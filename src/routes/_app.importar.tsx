@@ -410,8 +410,12 @@ function CronogramaImporter() {
             </div>
           </div>
           {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas no XML · {filtradas.length} no nível {level}</p>}
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
+            Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
+          </label>
           <p className="text-xs text-muted-foreground">
-            % previsto de cada item é calculado proporcionalmente à duração e pode ser ajustado depois no detalhe da obra.
+            % previsto de cada item é calculado proporcionalmente à duração e pode ser ajustado depois no detalhe da obra. Tarefas-resumo (Summary) são ignoradas para não somar com suas subtarefas.
           </p>
         </CardContent>
       </Card>

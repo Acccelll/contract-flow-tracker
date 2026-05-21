@@ -481,7 +481,7 @@ function CronogramaImporter() {
           data_fim: t.finish!,
           ordem: i,
           custo: Number((t.custo || 0).toFixed(2)),
-          percentual_previsto: Number(pctOf(t).toFixed(2)),
+          percentual_previsto: Number(pctOf(t).toFixed(6)),
         };
       });
       const { error } = await supabase.from("cronograma_itens").insert(rows);

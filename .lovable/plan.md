@@ -1,49 +1,36 @@
-## Diagnóstico
 
-Hoje o importador trata "linhas de resumo" (qualquer tarefa com filhos) e "folhas" (tarefas sem filhos) como igualmente selecionáveis, com checkbox em ambas e propagação pai→filhos. Isso permite cenários inválidos:
+## Problema
 
-- marcar pai **e** filho → soma >100% (banner amarelo de aviso).
-- marcar só um pai → importa um item "agregado" cujo custo/dias já está distribuído nos filhos do Project, distorcendo a medição futura.
+Na importação do XML do MS Project, cada item do cronograma é gravado com `percentual_previsto` arredondado a 2 casas decimais (`toFixed(2)`). Com 748 linhas (obra 209 - MARFRIG), o viés acumulado do arredondamento gera **100,59%** na tela da obra mesmo quando a soma de `custo` bate exatamente com o `valor_contrato` (R$ 8.755.000,00).
 
-O modelo correto do MS Project é: **apenas as folhas têm custo/duração próprios**; os níveis superiores são roll-ups. Portanto a importação deve considerar **somente as folhas** (a tarefa mais profunda de cada ramo), independentemente do `outlineLevel`. Uma tarefa em nível 2 que não tem filhos é tão "folha" quanto uma em nível 5.
+A tela de importação calcula o total a partir do `custo` em R$ direto, por isso mostra "100,00%". A tela da obra soma os percentuais persistidos, por isso mostra 100,59%.
 
-## Plano
+## Correção
 
-Mudanças **apenas em `src/routes/_app.importar.tsx`** (UI + lógica de seleção/persistência). Sem alteração de schema, sem mexer em outras telas.
+### 1. Importação — gravar percentual com precisão suficiente
+`src/routes/_app.importar.tsx`, função `importar()` (linha ~484):
 
-### 1. Conceito de "folha" como única unidade importável
-- `isLeaf = !hasChildren` continua valendo para qualquer nível.
-- Soma de custo / dias / % previsto passa a usar **somente folhas selecionadas**:
-  - `totalCusto = Σ custo das folhas selecionadas`
-  - `totalDias  = Σ dias das folhas selecionadas`
-  - `pctOf(t)` só é calculado para folhas; resumos exibem `—`.
-- Marcos de 0 dias permanecem importáveis (continuam sendo folhas com custo/dias 0 e % = 0).
+- Trocar `Number(pctOf(t).toFixed(2))` por `Number(pctOf(t).toFixed(6))`.
+- Manter `custo: Number((t.custo || 0).toFixed(2))` (cents são exatos).
 
-### 2. UI da árvore
-- **Resumos (com filhos)**: sem checkbox. Mostram só o `▾`/`▸` para expandir/recolher, em `bg-muted/40` e negrito, como contexto estrutural. Coluna Custo exibe o roll-up calculado (`Σ` dos descendentes folha), em `text-muted-foreground`, apenas como referência visual — não entra na soma total.
-- **Folhas**: checkbox normal, contribuem para custo/dias/%.
-- Remover o banner amarelo de sobreposição pai/filho (deixa de existir o caso).
-- Botões de seleção rápida passam a ser:
-  - "Todas as folhas" (padrão atual)
-  - "Folhas c/ duração > 0"
-  - "Limpar"
-  
-  (Remover "Todos os níveis" e a propagação pai→filhos, que agora não fazem sentido.)
+Isso reduz o drift máximo de ±0,5 p.p. por item para ±0,0000005 p.p., eliminando o problema mesmo em obras com milhares de linhas.
 
-### 3. Persistência em `cronograma_itens`
-- Inserir **apenas folhas selecionadas**.
-- `descricao`: `"{wbs} {nome}"` da folha, **prefixada com a cadeia de pais** entre colchetes para preservar contexto do Project, ex.:
-  `"2.2.1 Fornecimento - Armadura  ·  [2 SUPERESTRUTURA › 2.2 INFRA-ESTRUTURA - BLOCOS B1, B2]"`
-  Isso mantém a hierarquia legível na tela da obra sem precisar de tabela nova.
-- `ordem`: índice original do XML.
-- `custo`, `data_inicio`, `data_fim`, `percentual_previsto`: vindos da própria folha.
+### 2. Tela da obra — exibir percentual com formatação amigável
+`src/routes/_app.obras.$id.tsx`:
 
-### 4. Validação
-Reimportar a 209 com "Substituir":
-- soma de custo das folhas selecionadas deve bater com o valor do contrato (já estava batendo após o ajuste anterior);
-- soma de % previsto fecha em ~100%;
-- resumos aparecem na árvore como contexto, mas não geram linha em `cronograma_itens`.
+- Os locais que **exibem** percentual (`pct.toFixed(2)%`, aviso "soma do cronograma é X%") continuam mostrando 2 casas — só o valor armazenado ganha precisão.
+- O aviso "Atenção: soma é X%" (linha 207-208) passa a ser respeitado com a tolerância atual (`Math.abs(total - 100) > 0.01`), que agora será atendida.
+
+### 3. Backfill da obra atual
+Após o ajuste, reimportar a obra 209 (já existem 748 itens) usando o checkbox "Substituir cronograma existente" da própria tela, para que os percentuais recalculados sejam gravados com a nova precisão. Não é necessária migração de dados — a coluna `percentual_previsto` já é `numeric` sem escala fixa.
+
+## Detalhes técnicos
+
+- `pctOf(t)` retorna `(custo / totalCusto) * 100`. Quando `totalCusto === valor_contrato`, equivale a `(custo / valor_contrato) * 100`. O somatório teórico é exatamente 100 — o desvio é puramente numérico do arredondamento.
+- `numeric` no Postgres armazena bem 6 casas; nenhum índice/constraint depende da escala atual.
+- Nenhuma alteração de schema ou lógica de cálculo de medição/recebimento é necessária.
 
 ## Fora de escopo
-- Schema do banco, `_app.obras.$id.tsx`, `fluxo.tsx`, RLS.
-- Lógica de medição/percentual concluído (será tratada depois, como você indicou).
+
+- Mudar a unidade de armazenamento (ex.: guardar custo em vez de %) — manteria a arquitetura atual; só ajustamos precisão.
+- Backfill automático de outras obras já importadas — o usuário pode reimportar conforme necessário.

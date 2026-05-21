@@ -1,36 +1,53 @@
-
 ## Problema
 
-Na importação do XML do MS Project, cada item do cronograma é gravado com `percentual_previsto` arredondado a 2 casas decimais (`toFixed(2)`). Com 748 linhas (obra 209 - MARFRIG), o viés acumulado do arredondamento gera **100,59%** na tela da obra mesmo quando a soma de `custo` bate exatamente com o `valor_contrato` (R$ 8.755.000,00).
+A tela da obra está exibindo os valores em R$ recalculados a partir de `percentual_previsto * valor_contrato`, mas o `percentual_previsto` foi gravado com poucas casas decimais (4 casas no banco hoje, mesmo após o ajuste de código). Isso introduz desvio de centavos/reais em todas as linhas:
 
-A tela de importação calcula o total a partir do `custo` em R$ direto, por isso mostra "100,00%". A tela da obra soma os percentuais persistidos, por isso mostra 100,59%.
+| EDT | Project (correto) | Sistema (exibido) |
+|-----|------------------:|------------------:|
+| 1.1 | R$ 10.000,00 | R$ 9.998,21 |
+| 1.2 | R$ 110.000,00 | R$ 109.997,82 |
+| 1.3 | R$ 20.000,00 | R$ 19.996,42 |
+| 1   | R$ 845.000,00 | R$ 844.997,58 |
+
+Confirmado em banco (obra 209): `custo` está exato (R$ 10.000,00, R$ 110.000,00…), mas `percentual_previsto` aparece como 0.1142, 1.2564 etc. Como a UI faz `pct/100 * 8.755.000`, a exibição arredonda para baixo/cima e nunca bate com o Project.
 
 ## Correção
 
-### 1. Importação — gravar percentual com precisão suficiente
-`src/routes/_app.importar.tsx`, função `importar()` (linha ~484):
+A fonte da verdade do valor financeiro de cada tarefa do Project é o **custo importado** (já armazenado em `cronograma_itens.custo` com 2 casas). Vamos parar de reconstruir o valor a partir do percentual e exibir o `custo` diretamente, calculando o percentual a partir dele.
 
-- Trocar `Number(pctOf(t).toFixed(2))` por `Number(pctOf(t).toFixed(6))`.
-- Manter `custo: Number((t.custo || 0).toFixed(2))` (cents são exatos).
+### 1. `src/routes/_app.obras.$id.tsx` — hierarquia do cronograma
 
-Isso reduz o drift máximo de ±0,5 p.p. por item para ±0,0000005 p.p., eliminando o problema mesmo em obras com milhares de linhas.
+Em `CronogramaHierarquia` / `aggregate`:
 
-### 2. Tela da obra — exibir percentual com formatação amigável
-`src/routes/_app.obras.$id.tsx`:
+- Para **folhas**: `valor = Number(item.custo || 0)`.
+- Para **resumos**: `valor = soma do custo das folhas descendentes`.
+- `pct = valorContrato > 0 ? (valor / valorContrato) * 100 : 0`.
+- Manter exibição `pct.toFixed(2) + "%"` e `brl(valor)`.
 
-- Os locais que **exibem** percentual (`pct.toFixed(2)%`, aviso "soma do cronograma é X%") continuam mostrando 2 casas — só o valor armazenado ganha precisão.
-- O aviso "Atenção: soma é X%" (linha 207-208) passa a ser respeitado com a tolerância atual (`Math.abs(total - 100) > 0.01`), que agora será atendida.
+O aviso "soma do cronograma é X%" passa a comparar `soma(custo)` com `valor_contrato` (tolerância em centavos), eliminando o falso 100,59%.
 
-### 3. Backfill da obra atual
-Após o ajuste, reimportar a obra 209 (já existem 748 itens) usando o checkbox "Substituir cronograma existente" da própria tela, para que os percentuais recalculados sejam gravados com a nova precisão. Não é necessária migração de dados — a coluna `percentual_previsto` já é `numeric` sem escala fixa.
+### 2. "Aderência por janela do cronograma" (mesmo arquivo, ~linha 762)
 
-## Detalhes técnicos
+Trocar `previsto = (percentual_previsto/100) * valorContrato` por `previsto = Number(c.custo || 0)`. Para itens antigos sem `custo`, manter o cálculo atual como fallback (`custo > 0 ? custo : pct/100 * valorContrato`).
 
-- `pctOf(t)` retorna `(custo / totalCusto) * 100`. Quando `totalCusto === valor_contrato`, equivale a `(custo / valor_contrato) * 100`. O somatório teórico é exatamente 100 — o desvio é puramente numérico do arredondamento.
-- `numeric` no Postgres armazena bem 6 casas; nenhum índice/constraint depende da escala atual.
-- Nenhuma alteração de schema ou lógica de cálculo de medição/recebimento é necessária.
+### 3. Geração de previsão de recebimento
+
+Hoje (linha 163) calcula `valor = (percentual_previsto/100) * baseDist`. Trocar para usar `custo` quando presente, com o mesmo fallback do item 2. Isso garante que a previsão de NFs também bata centavo a centavo com o Project.
+
+### 4. Importação (`src/routes/_app.importar.tsx`)
+
+Sem alteração funcional adicional — o `custo` já é importado corretamente do XML (`Cost/100`). O `percentual_previsto` continua sendo gravado (para compatibilidade com itens lançados manualmente, que não têm `custo`), mas deixa de ser a fonte primária para a exibição.
 
 ## Fora de escopo
 
-- Mudar a unidade de armazenamento (ex.: guardar custo em vez de %) — manteria a arquitetura atual; só ajustamos precisão.
-- Backfill automático de outras obras já importadas — o usuário pode reimportar conforme necessário.
+- Backfill/migração de dados: nenhuma necessária. A correção lê `custo` que já está no banco.
+- Esconder a coluna "% previsto": fica como está, só passa a ser derivada de `custo`.
+- Mudanças em medições/notas fiscais.
+
+## Resultado esperado
+
+Após o deploy, sem reimportar nada, a obra 209 passa a mostrar exatamente:
+- 1.1 → R$ 10.000,00 / 0,11%
+- 1.2 → R$ 110.000,00 / 1,26%
+- 1 (resumo) → R$ 845.000,00 / 9,66%
+- Total = R$ 8.755.000,00 / 100,00% (bate com contrato).

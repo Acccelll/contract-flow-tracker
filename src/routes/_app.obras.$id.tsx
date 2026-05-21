@@ -109,7 +109,11 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
   const valorContrato = Number(obra.valor_contrato);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
-  const total = itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
+  const somaCusto = itens.reduce((a, i) => a + Number(i.custo || 0), 0);
+  const total = valorContrato > 0 && somaCusto > 0
+    ? (somaCusto / valorContrato) * 100
+    : itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
+  const totalDiffReais = valorContrato - somaCusto;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -160,7 +164,13 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
     // valor a distribuir nas janelas = contrato - antecipação
     const baseDist = valorContrato * (1 - pctAntec / 100);
     for (const i of itens) {
-      const valor = (Number(i.percentual_previsto) / 100) * baseDist;
+      const custo = Number(i.custo || 0);
+      const valor = custo > 0
+        ? custo * (1 - pctAntec / 100)
+        : (Number(i.percentual_previsto) / 100) * baseDist;
+      const pctItem = valorContrato > 0 && custo > 0
+        ? (custo / valorContrato) * 100
+        : Number(i.percentual_previsto || 0);
       const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
       const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
       linhas.push({
@@ -171,7 +181,7 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
         valor_previsto_inicial: valor,
         status: "previsto",
         origem: "cronograma",
-        observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${Number(i.percentual_previsto).toFixed(2)}%`,
+        observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${pctItem.toFixed(2)}%`,
       });
     }
     const { error } = await supabase.from("recebimentos").insert(linhas);
@@ -204,7 +214,10 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
       </CardHeader>
       <CardContent>
         <CronogramaHierarquia itens={itens} valorContrato={valorContrato} onRemove={remove} />
-        {total > 0 && Math.abs(total - 100) > 0.01 && (
+        {somaCusto > 0 && Math.abs(totalDiffReais) > 0.01 && (
+          <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {brl(somaCusto)} ({total.toFixed(2)}%) — diferença de {brl(totalDiffReais)} em relação ao contrato.</p>
+        )}
+        {somaCusto === 0 && total > 0 && Math.abs(total - 100) > 0.01 && (
           <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {total.toFixed(2)}% (ideal 100%).</p>
         )}
       </CardContent>
@@ -298,29 +311,33 @@ function buildTree(itens: any[]): CronoNode[] {
   return roots;
 }
 
-function aggregate(n: CronoNode): { pct: number; inicio?: string; fim?: string } {
+function aggregate(n: CronoNode): { custo: number; pct: number; inicio?: string; fim?: string } {
   if (n.item && n.children.length === 0) {
     return {
+      custo: Number(n.item.custo || 0),
       pct: Number(n.item.percentual_previsto || 0),
       inicio: n.item.data_inicio,
       fim: n.item.data_fim,
     };
   }
+  let custo = 0;
   let pct = 0;
   let inicio: string | undefined;
   let fim: string | undefined;
   for (const c of n.children) {
     const a = aggregate(c);
+    custo += a.custo;
     pct += a.pct;
     if (a.inicio && (!inicio || a.inicio < inicio)) inicio = a.inicio;
     if (a.fim && (!fim || a.fim > fim)) fim = a.fim;
   }
   if (n.item) {
+    custo += Number(n.item.custo || 0);
     pct += Number(n.item.percentual_previsto || 0);
     if (n.item.data_inicio && (!inicio || n.item.data_inicio < inicio)) inicio = n.item.data_inicio;
     if (n.item.data_fim && (!fim || n.item.data_fim > fim)) fim = n.item.data_fim;
   }
-  return { pct, inicio, fim };
+  return { custo, pct, inicio, fim };
 }
 
 function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]; valorContrato: number; onRemove: (id: string) => void }) {
@@ -366,9 +383,13 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
           const isLeaf = node.children.length === 0;
           const isCollapsed = collapsed.has(node.wbs);
           const agg = isLeaf
-            ? { pct: Number(node.item?.percentual_previsto || 0), inicio: node.item?.data_inicio, fim: node.item?.data_fim }
+            ? { custo: Number(node.item?.custo || 0), pct: Number(node.item?.percentual_previsto || 0), inicio: node.item?.data_inicio, fim: node.item?.data_fim }
             : aggregate(node);
-          const valor = (agg.pct / 100) * valorContrato;
+          // Valor: usa custo importado (fonte da verdade); cai para pct*contrato se custo=0.
+          const valor = agg.custo > 0 ? agg.custo : (agg.pct / 100) * valorContrato;
+          const pctExibir = agg.custo > 0 && valorContrato > 0
+            ? (agg.custo / valorContrato) * 100
+            : agg.pct;
 
           return (
             <TableRow key={node.wbs || node.item?.id} className={!isLeaf ? "bg-muted/40" : ""}>
@@ -396,10 +417,10 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
                   : "—"}
               </TableCell>
               <TableCell className={`text-right ${!isLeaf ? "text-muted-foreground" : ""}`}>
-                {agg.pct ? agg.pct.toFixed(2) + "%" : "—"}
+                {pctExibir ? pctExibir.toFixed(2) + "%" : "—"}
               </TableCell>
               <TableCell className={`text-right whitespace-nowrap ${!isLeaf ? "text-muted-foreground italic" : ""}`}>
-                {agg.pct ? brl(valor) : "—"}
+                {valor ? brl(valor) : "—"}
               </TableCell>
               <TableCell className="text-right">
                 {isLeaf && node.item && (
@@ -759,7 +780,8 @@ function PrevisaoTab({ obra, crono, receb, nfs, onChange }: { obra: any; crono: 
               </TableRow></TableHeader>
               <TableBody>
                 {crono.map((c) => {
-                  const previsto = (Number(c.percentual_previsto) / 100) * valorContrato;
+                  const custoItem = Number(c.custo || 0);
+                  const previsto = custoItem > 0 ? custoItem : (Number(c.percentual_previsto) / 100) * valorContrato;
                   const fatNoPer = nfs.filter((n) => n.data_emissao && n.data_emissao >= c.data_inicio && n.data_emissao <= c.data_fim)
                     .reduce((a, n) => a + Number(n.valor || 0), 0);
                   const ader = previsto > 0 ? (fatNoPer / previsto) * 100 : 0;

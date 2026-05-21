@@ -353,6 +353,10 @@ function CronogramaImporter() {
     if (escolhidas.length === 0) return toast.error("Nenhuma tarefa selecionada com datas válidas");
     setImporting(true);
     try {
+      if (substituir) {
+        const { error: delErr } = await supabase.from("cronograma_itens").delete().eq("obra_id", obraId);
+        if (delErr) throw delErr;
+      }
       const rows = escolhidas.map((t, i) => ({
         obra_id: obraId,
         descricao: t.name,

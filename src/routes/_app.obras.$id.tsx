@@ -307,6 +307,19 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
     const dataEmissao = f.data_emissao ? parseISO(f.data_emissao) : new Date();
     const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
     const valor = Number(f.valor || 0);
+
+    let pdf_url: string | null = null;
+    if (f.pdf instanceof File) {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (uid) {
+        const path = `${uid}/${obra.id}/${Date.now()}-${f.pdf.name}`;
+        const { error: upErr } = await supabase.storage.from("nfs").upload(path, f.pdf, { upsert: false });
+        if (upErr) return toast.error(`Upload PDF: ${upErr.message}`);
+        pdf_url = path;
+      }
+    }
+
     const { data: nf, error } = await supabase.from("notas_fiscais").insert({
       obra_id: obra.id,
       medicao_id: f.medicao_id || null,
@@ -314,9 +327,9 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       data_emissao: f.data_emissao || null,
       valor,
       data_vencimento: venc.toISOString().slice(0, 10),
+      pdf_url,
     }).select().single();
     if (error || !nf) return toast.error(error?.message ?? "Erro");
-    // criar recebimento previsto vinculado à NF
     await supabase.from("recebimentos").insert({
       obra_id: obra.id,
       nota_fiscal_id: nf.id,
@@ -328,11 +341,16 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       congelado: true,
     });
 
-    // recalcular previsão: redistribuir saldo entre parcelas futuras sem NF
     await recalcularPrevisaoNF(obra.id, Number(obra.valor_contrato));
     toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")} · previsão recalculada`);
     setOpen(false); setF({});
     onChange();
+  }
+
+  async function abrirPdf(path: string) {
+    const { data, error } = await supabase.storage.from("nfs").createSignedUrl(path, 60);
+    if (error || !data) return toast.error("Erro ao gerar link");
+    window.open(data.signedUrl, "_blank");
   }
 
 
@@ -356,6 +374,7 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5 col-span-2"><Label>PDF da NF</Label><Input type="file" accept="application/pdf" onChange={(e) => setF({ ...f, pdf: e.target.files?.[0] ?? null })} /></div>
               <DialogFooter className="col-span-2"><Button type="submit">Salvar</Button></DialogFooter>
             </form>
           </DialogContent>
@@ -363,7 +382,7 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       </CardHeader>
       <CardContent>
         <Table>
-          <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Emissão</TableHead><TableHead>Valor</TableHead><TableHead>Vencimento</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Emissão</TableHead><TableHead>Valor</TableHead><TableHead>Vencimento</TableHead><TableHead>PDF</TableHead></TableRow></TableHeader>
           <TableBody>
             {nfs.map((n) => (
               <TableRow key={n.id}>
@@ -371,9 +390,10 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
                 <TableCell>{n.data_emissao ? format(parseISO(n.data_emissao), "dd/MM/yy") : "—"}</TableCell>
                 <TableCell>{brl(n.valor)}</TableCell>
                 <TableCell>{n.data_vencimento ? format(parseISO(n.data_vencimento), "dd/MM/yy") : "—"}</TableCell>
+                <TableCell>{n.pdf_url ? <Button size="sm" variant="ghost" onClick={() => abrirPdf(n.pdf_url!)}>Ver</Button> : "—"}</TableCell>
               </TableRow>
             ))}
-            {nfs.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}
+            {nfs.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}
           </TableBody>
         </Table>
       </CardContent>

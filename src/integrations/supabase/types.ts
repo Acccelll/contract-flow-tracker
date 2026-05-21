@@ -151,6 +151,7 @@ export type Database = {
           numero: string | null
           obra_id: string
           observacoes: string | null
+          pdf_url: string | null
           updated_at: string
           valor: number
         }
@@ -163,6 +164,7 @@ export type Database = {
           numero?: string | null
           obra_id: string
           observacoes?: string | null
+          pdf_url?: string | null
           updated_at?: string
           valor?: number
         }
@@ -175,6 +177,7 @@ export type Database = {
           numero?: string | null
           obra_id?: string
           observacoes?: string | null
+          pdf_url?: string | null
           updated_at?: string
           valor?: number
         }

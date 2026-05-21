@@ -63,6 +63,8 @@ function Dashboard() {
         <Kpi icon={AlertCircle} label="Próximos 30d" value={brl(range(fim30))} hint={`60d: ${brl(range(fim60))} · 90d: ${brl(range(fim90))}`} />
       </div>
 
+      <AlertasCard recebimentos={recebimentos} obras={obras} />
+
       <Card>
         <CardHeader><CardTitle>Obras</CardTitle></CardHeader>
         <CardContent>
@@ -106,6 +108,77 @@ function Kpi({ icon: Icon, label, value, hint }: { icon: any; label: string; val
         </div>
         <div className="text-2xl font-semibold mt-2">{value}</div>
         {hint && <div className="text-xs text-muted-foreground mt-1">{hint}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AlertasCard({ recebimentos, obras }: { recebimentos: any[]; obras: any[] }) {
+  const hoje = new Date();
+  const em7 = addDays(hoje, 7);
+  const obraMap = new Map(obras.map((o) => [o.id, o]));
+  const pendentes = recebimentos.filter((r) => !r.data_recebimento);
+  const atrasados = pendentes
+    .filter((r) => new Date(r.data_prevista) < hoje)
+    .sort((a, b) => a.data_prevista.localeCompare(b.data_prevista));
+  const proximos = pendentes
+    .filter((r) => new Date(r.data_prevista) >= hoje && new Date(r.data_prevista) <= em7)
+    .sort((a, b) => a.data_prevista.localeCompare(b.data_prevista));
+
+  if (atrasados.length === 0 && proximos.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <AlertCircle className="h-4 w-4 text-amber-600" /> Alertas
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {atrasados.length > 0 && (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-red-700 dark:text-red-300 mb-2">
+              Atrasados ({atrasados.length})
+            </div>
+            <ul className="space-y-1 text-sm">
+              {atrasados.slice(0, 5).map((r) => {
+                const o = obraMap.get(r.obra_id);
+                return (
+                  <li key={r.id} className="flex items-center justify-between border-l-2 border-red-500 pl-3 py-1">
+                    <Link to="/obras/$id" params={{ id: r.obra_id }} className="hover:underline">
+                      {o?.codigo ?? "—"} · {o?.nome ?? "?"}
+                    </Link>
+                    <span className="text-red-700 dark:text-red-300">
+                      {format(new Date(r.data_prevista), "dd/MM/yy")} · {brl(r.valor_previsto)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {proximos.length > 0 && (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-2">
+              Próximos 7 dias ({proximos.length})
+            </div>
+            <ul className="space-y-1 text-sm">
+              {proximos.slice(0, 5).map((r) => {
+                const o = obraMap.get(r.obra_id);
+                return (
+                  <li key={r.id} className="flex items-center justify-between border-l-2 border-amber-500 pl-3 py-1">
+                    <Link to="/obras/$id" params={{ id: r.obra_id }} className="hover:underline">
+                      {o?.codigo ?? "—"} · {o?.nome ?? "?"}
+                    </Link>
+                    <span className="text-amber-700 dark:text-amber-300">
+                      {format(new Date(r.data_prevista), "dd/MM/yy")} · {brl(r.valor_previsto)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

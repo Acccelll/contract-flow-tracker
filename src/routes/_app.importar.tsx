@@ -304,6 +304,7 @@ function CronogramaImporter() {
   const [obraId, setObraId] = useState<string>("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [importing, setImporting] = useState(false);
+  const [substituir, setSubstituir] = useState<boolean>(true);
   const [done, setDone] = useState<number | null>(null);
 
   const { data: obras } = useQuery({

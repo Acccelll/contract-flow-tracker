@@ -64,18 +64,16 @@ function FluxoPage() {
   const atrasado = receb.filter((r: any) => !r.data_recebimento && parseISO(r.data_prevista) < hoje).reduce((a: number, r: any) => a + Number(r.valor_previsto), 0);
 
   // Pivot por obra × mês (valor previsto)
-  const pivot = useMemo(() => {
-    return obrasFiltradas.map((o: any) => {
-      const cols = meses.map((m) => {
-        const k = format(m, "yyyy-MM");
-        const prev = receb.filter((r: any) => r.obra_id === o.id && r.data_prevista?.startsWith(k) && !r.data_recebimento).reduce((a: number, r: any) => a + Number(r.valor_previsto), 0);
-        const rec = receb.filter((r: any) => r.obra_id === o.id && r.data_recebimento?.startsWith(k)).reduce((a: number, r: any) => a + Number(r.valor_recebido || r.valor_previsto), 0);
-        return { k, prev, rec };
-      });
-      const total = cols.reduce((a, c) => a + c.prev + c.rec, 0);
-      return { obra: o, cols, total };
+  const pivot = obrasFiltradas.map((o: any) => {
+    const cols = meses.map((m) => {
+      const k = format(m, "yyyy-MM");
+      const prev = receb.filter((r: any) => r.obra_id === o.id && r.data_prevista?.startsWith(k) && !r.data_recebimento).reduce((a: number, r: any) => a + Number(r.valor_previsto), 0);
+      const rec = receb.filter((r: any) => r.obra_id === o.id && r.data_recebimento?.startsWith(k)).reduce((a: number, r: any) => a + Number(r.valor_recebido || r.valor_previsto), 0);
+      return { k, prev, rec };
     });
-  }, [obrasFiltradas, receb, meses]);
+    const total = cols.reduce((a, c) => a + c.prev + c.rec, 0);
+    return { obra: o, cols, total };
+  });
 
   const totalGeral = pivot.reduce((a: number, p: any) => a + p.total, 0);
 

@@ -478,5 +478,4 @@ function dias(start: string, end: string): number {
   const b = new Date(end).getTime();
   return Math.max(1, Math.round((b - a) / (1000 * 60 * 60 * 24)));
 }
-  );
-}
+

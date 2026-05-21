@@ -390,7 +390,7 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
                 <TableCell>{n.data_emissao ? format(parseISO(n.data_emissao), "dd/MM/yy") : "—"}</TableCell>
                 <TableCell>{brl(n.valor)}</TableCell>
                 <TableCell>{n.data_vencimento ? format(parseISO(n.data_vencimento), "dd/MM/yy") : "—"}</TableCell>
-                <TableCell>{n.pdf_url ? <Button size="sm" variant="ghost" onClick={() => abrirPdf(n.pdf_url)}>Ver</Button> : "—"}</TableCell>
+                <TableCell>{n.pdf_url ? <Button size="sm" variant="ghost" onClick={() => abrirPdf(n.pdf_url!)}>Ver</Button> : "—"}</TableCell>
               </TableRow>
             ))}
             {nfs.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}

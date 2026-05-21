@@ -294,7 +294,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isMilestone: get("Milestone") === "1",
     };
   });
-  return { titulo, tasks: tasks.filter((t) => t.outlineLevel > 0 && t.name) };
+  return { titulo, tasks: tasks.filter((t) => t.outlineLevel > 0 && t.name && !t.isSummary) };
 }
 
 function CronogramaImporter() {

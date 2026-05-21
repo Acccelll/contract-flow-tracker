@@ -329,7 +329,9 @@ function CronogramaImporter() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [substituir, setSubstituir] = useState<boolean>(true);
+  const [ponderacao, setPonderacao] = useState<"custo" | "dias">("custo");
   const [done, setDone] = useState<number | null>(null);
+
 
   const { data: obras } = useQuery({
     queryKey: ["obras-lista"],

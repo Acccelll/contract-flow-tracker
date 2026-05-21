@@ -164,7 +164,13 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
     // valor a distribuir nas janelas = contrato - antecipação
     const baseDist = valorContrato * (1 - pctAntec / 100);
     for (const i of itens) {
-      const valor = (Number(i.percentual_previsto) / 100) * baseDist;
+      const custo = Number(i.custo || 0);
+      const valor = custo > 0
+        ? custo * (1 - pctAntec / 100)
+        : (Number(i.percentual_previsto) / 100) * baseDist;
+      const pctItem = valorContrato > 0 && custo > 0
+        ? (custo / valorContrato) * 100
+        : Number(i.percentual_previsto || 0);
       const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
       const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
       linhas.push({
@@ -175,7 +181,7 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
         valor_previsto_inicial: valor,
         status: "previsto",
         origem: "cronograma",
-        observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${Number(i.percentual_previsto).toFixed(2)}%`,
+        observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${pctItem.toFixed(2)}%`,
       });
     }
     const { error } = await supabase.from("recebimentos").insert(linhas);

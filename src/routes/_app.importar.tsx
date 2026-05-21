@@ -272,6 +272,7 @@ type MppTask = {
   isMilestone: boolean;
   parentUid?: string;
   hasChildren: boolean;
+  custo: number;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
@@ -287,6 +288,10 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
     const get = (tag: string) => t.querySelector(`:scope > ${tag}`)?.textContent?.trim();
     const start = get("Start");
     const finish = get("Finish");
+    // Cost no XML do MS Project vem em centavos (ex.: 875500000 → R$ 8.755.000,00)
+    const rawCost = Number(get("Cost") ?? "0");
+    const fixedCost = Number(get("FixedCost") ?? "0");
+    const custo = (rawCost || fixedCost) / 100;
     return {
       uid: get("UID") ?? "",
       name: get("Name") ?? "(sem nome)",
@@ -297,8 +302,10 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isSummary: get("Summary") === "1",
       isMilestone: get("Milestone") === "1",
       hasChildren: false,
+      custo: isFinite(custo) ? custo : 0,
     };
   }).filter((t) => t.outlineLevel > 0 && t.name);
+
 
   // parentUid via stack pela ordem do XML
   const stack: MppTask[] = [];
@@ -322,7 +329,9 @@ function CronogramaImporter() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [substituir, setSubstituir] = useState<boolean>(true);
+  const [ponderacao, setPonderacao] = useState<"custo" | "dias">("custo");
   const [done, setDone] = useState<number | null>(null);
+
 
   const { data: obras } = useQuery({
     queryKey: ["obras-lista"],
@@ -376,6 +385,16 @@ function CronogramaImporter() {
 
   const escolhidas = tasks.filter((t) => selected[t.uid] && t.start && t.finish);
   const totalDias = escolhidas.reduce((acc, t) => acc + dias(t.start!, t.finish!), 0) || 1;
+  const totalCusto = escolhidas.reduce((acc, t) => acc + (t.custo || 0), 0);
+  // se a opção for "custo" mas a seleção não tiver nenhum valor, cai para "dias"
+  const modoEfetivo: "custo" | "dias" = ponderacao === "custo" && totalCusto > 0 ? "custo" : "dias";
+
+  function pctOf(t: MppTask): number {
+    if (!t.start || !t.finish) return 0;
+    if (modoEfetivo === "custo") return totalCusto > 0 ? ((t.custo || 0) / totalCusto) * 100 : 0;
+    return (dias(t.start, t.finish) / totalDias) * 100;
+  }
+
 
   const selSet = new Set(escolhidas.map((t) => t.uid));
   let sobreposicoes = 0;
@@ -447,13 +466,15 @@ function CronogramaImporter() {
           data_inicio: t.start!,
           data_fim: t.finish!,
           ordem: i,
-          percentual_previsto: Number(((dias(t.start!, t.finish!) / totalDias) * 100).toFixed(2)),
+          custo: Number((t.custo || 0).toFixed(2)),
+          percentual_previsto: Number(pctOf(t).toFixed(2)),
         };
       });
       const { error } = await supabase.from("cronograma_itens").insert(rows);
       if (error) throw error;
       setDone(rows.length);
       toast.success(`${rows.length} itens de cronograma importados`);
+
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -490,9 +511,20 @@ function CronogramaImporter() {
             <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
             Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
           </label>
+          <div className="space-y-1.5">
+            <Label>Ponderação do % previsto</Label>
+            <Select value={ponderacao} onValueChange={(v) => setPonderacao(v as "custo" | "dias")}>
+              <SelectTrigger className="md:w-[280px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="custo">Por custo (R$) — recomendado</SelectItem>
+                <SelectItem value="dias">Por duração (dias)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <p className="text-xs text-muted-foreground">
-            A árvore espelha a EDT do MS Project. Marcos (0 dias, ex.: ART) são preservados com 0% previsto. Use as setas (▾/▸) para recolher fases. O % previsto de cada item é proporcional à sua duração dentro da seleção.
+            A árvore espelha a EDT do MS Project. Marcos (0 dias, ex.: ART) são preservados com 0% previsto. O % previsto é proporcional ao <strong>custo</strong> (R$) de cada tarefa dentro da seleção — caso o XML não traga custos, cai automaticamente para duração em dias.
           </p>
+
         </CardContent>
       </Card>
 
@@ -502,13 +534,14 @@ function CronogramaImporter() {
             <div>
               <CardTitle>Tarefas do cronograma ({tasks.length})</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {escolhidas.length} selecionadas · soma {totalDias} dias
+                {escolhidas.length} selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
                 {sobreposicoes > 0 && (
                   <span className="ml-2 inline-flex items-center rounded bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 text-[11px]">
                     ⚠ {sobreposicoes} sobreposição{sobreposicoes > 1 ? "ões" : ""} pai/filho — a soma passará de 100%
                   </span>
                 )}
               </p>
+
             </div>
             <div className="flex gap-2 flex-wrap">
               <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren)}>Folhas</Button>
@@ -536,14 +569,17 @@ function CronogramaImporter() {
                 <TableHead>Início</TableHead>
                 <TableHead>Fim</TableHead>
                 <TableHead className="text-right">Dias</TableHead>
+                <TableHead className="text-right">Custo</TableHead>
                 <TableHead className="text-right">% previsto</TableHead>
               </TableRow></TableHeader>
+
               <TableBody>
                 {visibleTasks.map((t) => {
                   const d = t.start && t.finish ? dias(t.start, t.finish) : 0;
-                  const pct = selected[t.uid] && d > 0 ? (d / totalDias) * 100 : 0;
+                  const pct = selected[t.uid] ? pctOf(t) : 0;
                   const isSummary = t.hasChildren || t.isSummary;
                   const isCollapsed = collapsed.has(t.uid);
+
                   return (
                     <TableRow key={t.uid} className={isSummary ? "bg-muted/40" : ""}>
                       <TableCell>
@@ -577,7 +613,9 @@ function CronogramaImporter() {
                       <TableCell className="whitespace-nowrap">{t.start ?? "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{t.finish ?? "—"}</TableCell>
                       <TableCell className="text-right">{d || (t.isMilestone ? "0" : "—")}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">{t.custo ? brl(t.custo) : "—"}</TableCell>
                       <TableCell className="text-right">{pct ? pct.toFixed(1) + "%" : "—"}</TableCell>
+
                     </TableRow>
                   );
                 })}

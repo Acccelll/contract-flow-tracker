@@ -203,21 +203,7 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
         </div>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader><TableRow><TableHead>Período</TableHead><TableHead>Descrição</TableHead><TableHead>% previsto</TableHead><TableHead>Valor</TableHead><TableHead></TableHead></TableRow></TableHeader>
-          <TableBody>
-            {itens.map((i) => (
-              <TableRow key={i.id}>
-                <TableCell>{format(parseISO(i.data_inicio), "dd/MM/yy")} – {format(parseISO(i.data_fim), "dd/MM/yy")}</TableCell>
-                <TableCell>{i.descricao ?? "—"}</TableCell>
-                <TableCell>{Number(i.percentual_previsto).toFixed(2)}%</TableCell>
-                <TableCell>{brl((Number(i.percentual_previsto) / 100) * valorContrato)}</TableCell>
-                <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => remove(i.id)}>Remover</Button></TableCell>
-              </TableRow>
-            ))}
-            {itens.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Cadastre as janelas do cronograma</TableCell></TableRow>}
-          </TableBody>
-        </Table>
+        <CronogramaHierarquia itens={itens} valorContrato={valorContrato} onRemove={remove} />
         {total > 0 && Math.abs(total - 100) > 0.01 && (
           <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {total.toFixed(2)}% (ideal 100%).</p>
         )}
@@ -225,6 +211,210 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
     </Card>
   );
 }
+
+// ====== Hierarquia estilo MS Project ======
+type CronoNode = {
+  wbs: string;
+  name: string;
+  depth: number;
+  item?: any; // item folha original
+  children: CronoNode[];
+};
+
+function wbsParts(w: string): number[] {
+  return w.split(".").map((p) => Number(p) || 0);
+}
+
+function wbsCompare(a: string, b: string): number {
+  const pa = wbsParts(a);
+  const pb = wbsParts(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+function parseDescricao(desc: string): { wbs: string; name: string; chain: { wbs: string; name: string }[] } {
+  const s = (desc || "").trim();
+  // Separa o sufixo de contexto entre colchetes
+  const ctxMatch = s.match(/\s+·\s+\[(.+)\]\s*$/);
+  const head = ctxMatch ? s.slice(0, ctxMatch.index).trim() : s;
+  const chainStr = ctxMatch?.[1] ?? "";
+
+  const splitWbs = (txt: string): { wbs: string; name: string } => {
+    const m = txt.match(/^(\d+(?:\.\d+)*)\s+(.*)$/);
+    return m ? { wbs: m[1], name: m[2].trim() } : { wbs: "", name: txt };
+  };
+
+  const leaf = splitWbs(head);
+  const chain = chainStr ? chainStr.split(" › ").map(splitWbs) : [];
+  return { ...leaf, chain };
+}
+
+function buildTree(itens: any[]): CronoNode[] {
+  const byWbs = new Map<string, CronoNode>();
+  const ensure = (wbs: string, name: string): CronoNode => {
+    let n = byWbs.get(wbs);
+    if (!n) {
+      n = { wbs, name, depth: wbs ? wbs.split(".").length : 1, children: [] };
+      byWbs.set(wbs, n);
+    } else if (!n.name) {
+      n.name = name;
+    }
+    return n;
+  };
+
+  for (const it of itens) {
+    const { wbs, name, chain } = parseDescricao(String(it.descricao ?? ""));
+    // garante todos os pais
+    for (const p of chain) ensure(p.wbs, p.name);
+    const leaf = ensure(wbs || `__${it.id}`, name || "(sem nome)");
+    leaf.item = it;
+  }
+
+  // organiza pais/filhos pela cadeia WBS (1.2.3 → pai é 1.2)
+  const roots: CronoNode[] = [];
+  const nodes = Array.from(byWbs.values()).sort((a, b) => wbsCompare(a.wbs, b.wbs));
+  for (const n of nodes) {
+    const parts = n.wbs.split(".");
+    if (parts.length > 1) {
+      const parentWbs = parts.slice(0, -1).join(".");
+      const parent = byWbs.get(parentWbs);
+      if (parent) {
+        parent.children.push(n);
+        continue;
+      }
+    }
+    roots.push(n);
+  }
+  // ordena filhos
+  const sortRec = (n: CronoNode) => {
+    n.children.sort((a, b) => wbsCompare(a.wbs, b.wbs));
+    n.children.forEach(sortRec);
+  };
+  roots.sort((a, b) => wbsCompare(a.wbs, b.wbs));
+  roots.forEach(sortRec);
+  return roots;
+}
+
+function aggregate(n: CronoNode): { pct: number; inicio?: string; fim?: string } {
+  if (n.item && n.children.length === 0) {
+    return {
+      pct: Number(n.item.percentual_previsto || 0),
+      inicio: n.item.data_inicio,
+      fim: n.item.data_fim,
+    };
+  }
+  let pct = 0;
+  let inicio: string | undefined;
+  let fim: string | undefined;
+  for (const c of n.children) {
+    const a = aggregate(c);
+    pct += a.pct;
+    if (a.inicio && (!inicio || a.inicio < inicio)) inicio = a.inicio;
+    if (a.fim && (!fim || a.fim > fim)) fim = a.fim;
+  }
+  if (n.item) {
+    pct += Number(n.item.percentual_previsto || 0);
+    if (n.item.data_inicio && (!inicio || n.item.data_inicio < inicio)) inicio = n.item.data_inicio;
+    if (n.item.data_fim && (!fim || n.item.data_fim > fim)) fim = n.item.data_fim;
+  }
+  return { pct, inicio, fim };
+}
+
+function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]; valorContrato: number; onRemove: (id: string) => void }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const roots = buildTree(itens);
+
+  function toggle(key: string) {
+    setCollapsed((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key); else n.add(key);
+      return n;
+    });
+  }
+
+  const rows: { node: CronoNode; depth: number }[] = [];
+  const walk = (n: CronoNode, depth: number) => {
+    rows.push({ node: n, depth });
+    if (collapsed.has(n.wbs)) return;
+    for (const c of n.children) walk(c, depth + 1);
+  };
+  roots.forEach((r) => walk(r, 0));
+
+  if (rows.length === 0) {
+    return (
+      <p className="text-center text-muted-foreground py-8 text-sm">Cadastre as janelas do cronograma</p>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-24">EDT</TableHead>
+          <TableHead>Descrição</TableHead>
+          <TableHead className="whitespace-nowrap">Período</TableHead>
+          <TableHead className="text-right">% previsto</TableHead>
+          <TableHead className="text-right">Valor</TableHead>
+          <TableHead></TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map(({ node, depth }) => {
+          const isLeaf = node.children.length === 0;
+          const isCollapsed = collapsed.has(node.wbs);
+          const agg = isLeaf
+            ? { pct: Number(node.item?.percentual_previsto || 0), inicio: node.item?.data_inicio, fim: node.item?.data_fim }
+            : aggregate(node);
+          const valor = (agg.pct / 100) * valorContrato;
+
+          return (
+            <TableRow key={node.wbs || node.item?.id} className={!isLeaf ? "bg-muted/40" : ""}>
+              <TableCell className="font-mono text-xs text-muted-foreground">{node.wbs}</TableCell>
+              <TableCell>
+                <div className="flex items-center" style={{ paddingLeft: `${depth * 18}px` }}>
+                  {!isLeaf ? (
+                    <button
+                      type="button"
+                      onClick={() => toggle(node.wbs)}
+                      className="mr-1 inline-flex h-4 w-4 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                      aria-label={isCollapsed ? "Expandir" : "Recolher"}
+                    >
+                      {isCollapsed ? "▸" : "▾"}
+                    </button>
+                  ) : (
+                    <span className="mr-1 inline-block w-4 text-center text-xs text-muted-foreground">·</span>
+                  )}
+                  <span className={!isLeaf ? "font-semibold" : ""}>{node.name}</span>
+                </div>
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-xs">
+                {agg.inicio && agg.fim
+                  ? `${format(parseISO(agg.inicio), "dd/MM/yy")} – ${format(parseISO(agg.fim), "dd/MM/yy")}`
+                  : "—"}
+              </TableCell>
+              <TableCell className={`text-right ${!isLeaf ? "text-muted-foreground" : ""}`}>
+                {agg.pct ? agg.pct.toFixed(2) + "%" : "—"}
+              </TableCell>
+              <TableCell className={`text-right whitespace-nowrap ${!isLeaf ? "text-muted-foreground italic" : ""}`}>
+                {agg.pct ? brl(valor) : "—"}
+              </TableCell>
+              <TableCell className="text-right">
+                {isLeaf && node.item && (
+                  <Button variant="ghost" size="sm" onClick={() => onRemove(node.item.id)}>Remover</Button>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+
 
 
 function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes: any[]; receb: any[]; onChange: () => void }) {

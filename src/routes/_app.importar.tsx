@@ -511,9 +511,20 @@ function CronogramaImporter() {
             <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
             Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
           </label>
+          <div className="space-y-1.5">
+            <Label>Ponderação do % previsto</Label>
+            <Select value={ponderacao} onValueChange={(v) => setPonderacao(v as "custo" | "dias")}>
+              <SelectTrigger className="md:w-[280px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="custo">Por custo (R$) — recomendado</SelectItem>
+                <SelectItem value="dias">Por duração (dias)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <p className="text-xs text-muted-foreground">
-            A árvore espelha a EDT do MS Project. Marcos (0 dias, ex.: ART) são preservados com 0% previsto. Use as setas (▾/▸) para recolher fases. O % previsto de cada item é proporcional à sua duração dentro da seleção.
+            A árvore espelha a EDT do MS Project. Marcos (0 dias, ex.: ART) são preservados com 0% previsto. O % previsto é proporcional ao <strong>custo</strong> (R$) de cada tarefa dentro da seleção — caso o XML não traga custos, cai automaticamente para duração em dias.
           </p>
+
         </CardContent>
       </Card>
 

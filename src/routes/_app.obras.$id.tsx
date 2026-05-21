@@ -203,21 +203,7 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
         </div>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader><TableRow><TableHead>Período</TableHead><TableHead>Descrição</TableHead><TableHead>% previsto</TableHead><TableHead>Valor</TableHead><TableHead></TableHead></TableRow></TableHeader>
-          <TableBody>
-            {itens.map((i) => (
-              <TableRow key={i.id}>
-                <TableCell>{format(parseISO(i.data_inicio), "dd/MM/yy")} – {format(parseISO(i.data_fim), "dd/MM/yy")}</TableCell>
-                <TableCell>{i.descricao ?? "—"}</TableCell>
-                <TableCell>{Number(i.percentual_previsto).toFixed(2)}%</TableCell>
-                <TableCell>{brl((Number(i.percentual_previsto) / 100) * valorContrato)}</TableCell>
-                <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => remove(i.id)}>Remover</Button></TableCell>
-              </TableRow>
-            ))}
-            {itens.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Cadastre as janelas do cronograma</TableCell></TableRow>}
-          </TableBody>
-        </Table>
+        <CronogramaHierarquia itens={itens} valorContrato={valorContrato} onRemove={remove} />
         {total > 0 && Math.abs(total - 100) > 0.01 && (
           <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {total.toFixed(2)}% (ideal 100%).</p>
         )}

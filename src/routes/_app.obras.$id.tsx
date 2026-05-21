@@ -1,20 +1,23 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createFileRoute, useParams, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, CheckCircle2, FileText, Banknote } from "lucide-react";
+import { ArrowLeft, Plus, CheckCircle2, FileText, Banknote, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetFooter } from "@/components/ui/sheet";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { brl, calcularVencimento, redistribuirSaldo } from "@/lib/billing";
+import { brl, calcularVencimento } from "@/lib/billing";
 import { addDays, format, parseISO } from "date-fns";
 
 export const Route = createFileRoute("/_app/obras/$id")({ component: ObraDetail });
@@ -34,6 +37,19 @@ function ObraDetail() {
   const { data: medicoes } = useQuery({
     queryKey: ["medicoes", id],
     queryFn: async () => (await supabase.from("medicoes").select("*").eq("obra_id", id).order("data_corte")).data ?? [],
+  });
+  const { data: itensMedicao } = useQuery({
+    queryKey: ["itens_medicao", id],
+    queryFn: async () => {
+      if (!medicoes?.length) return [];
+      return (
+        await supabase
+          .from("itens_medicao")
+          .select("*, cronograma_itens(id, descricao, custo, percentual_previsto, ordem)")
+          .in("medicao_id", medicoes.map((m) => m.id))
+      ).data ?? [];
+    },
+    enabled: !!medicoes?.length,
   });
   const { data: nfs } = useQuery({
     queryKey: ["nfs", id],
@@ -95,7 +111,20 @@ function ObraDetail() {
 
         <TabsContent value="previsao"><PrevisaoTab obra={obra} crono={crono ?? []} receb={receb ?? []} nfs={nfs ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
         <TabsContent value="cronograma"><CronogramaTab obra={obra} itens={crono ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["crono", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
-        <TabsContent value="medicoes"><MedicoesTab obra={obra} medicoes={medicoes ?? []} receb={receb ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["medicoes", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
+        <TabsContent value="medicoes">
+          <MedicoesTab
+            obra={obra}
+            crono={crono ?? []}
+            medicoes={medicoes ?? []}
+            itensMedicao={itensMedicao ?? []}
+            onChange={() => {
+              qc.invalidateQueries({ queryKey: ["medicoes", id] });
+              qc.invalidateQueries({ queryKey: ["itens_medicao", id] });
+              qc.invalidateQueries({ queryKey: ["crono", id] });
+              qc.invalidateQueries({ queryKey: ["receb", id] });
+            }}
+          />
+        </TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
       </Tabs>
@@ -114,6 +143,19 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
     ? (somaCusto / valorContrato) * 100
     : itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
   const totalDiffReais = valorContrato - somaCusto;
+
+  // % realizado global: soma(custo * pctReal) / soma(custo). Folhas com custo>0.
+  const somaExec = itens.reduce((a, i) => {
+    const custo = Number(i.custo || 0);
+    const base = custo > 0 ? custo : (Number(i.percentual_previsto || 0) / 100) * valorContrato;
+    const pctReal = Number(i.percentual_realizado || 0);
+    return a + (base * pctReal) / 100;
+  }, 0);
+  const baseTotal = itens.reduce((a, i) => {
+    const custo = Number(i.custo || 0);
+    return a + (custo > 0 ? custo : (Number(i.percentual_previsto || 0) / 100) * valorContrato);
+  }, 0);
+  const pctRealizadoTotal = baseTotal > 0 ? (somaExec / baseTotal) * 100 : 0;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -137,7 +179,6 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
 
   async function gerarPrevisao() {
     if (itens.length === 0) return toast.error("Cadastre o cronograma primeiro");
-    // remove previsões anteriores ainda sem NF e sem recebimento e não congeladas
     const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento, congelado").eq("obra_id", obraId);
     const apagar = (receb ?? []).filter((r: any) => !r.nota_fiscal_id && !r.data_recebimento && !r.congelado).map((r: any) => r.id);
     if (apagar.length) await supabase.from("recebimentos").delete().in("id", apagar);
@@ -146,7 +187,6 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
     const pctAntec = Number(obra.percentual_antecipacao || 0);
     const linhas: any[] = [];
 
-    // Antecipação (se houver) — recebida no início da obra
     if (pctAntec > 0 && obra.data_inicio) {
       const valorAntec = (pctAntec / 100) * valorContrato;
       const venc = calcularVencimento(parseISO(obra.data_inicio), Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
@@ -161,7 +201,6 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
       });
     }
 
-    // valor a distribuir nas janelas = contrato - antecipação
     const baseDist = valorContrato * (1 - pctAntec / 100);
     for (const i of itens) {
       const custo = Number(i.custo || 0);
@@ -190,11 +229,27 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
     onChange();
   }
 
-
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
-        <CardTitle>Cronograma · {total.toFixed(2)}% planejado</CardTitle>
+        <div className="flex-1 min-w-[260px]">
+          <CardTitle>
+            Cronograma · {total.toFixed(2)}% planejado · {pctRealizadoTotal.toFixed(2)}% realizado
+          </CardTitle>
+          <div className="relative mt-2 h-2 w-full rounded bg-muted overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-muted-foreground/30"
+              style={{ width: `${Math.min(100, total)}%` }}
+            />
+            <div
+              className="absolute inset-y-0 left-0 bg-green-500"
+              style={{ width: `${Math.min(100, pctRealizadoTotal)}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Executado: {brl(somaExec)} de {brl(baseTotal)}
+          </p>
+        </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={gerarPrevisao}><FileText className="h-4 w-4 mr-2" />Gerar previsão</Button>
           <Dialog open={open} onOpenChange={setOpen}>
@@ -230,7 +285,7 @@ type CronoNode = {
   wbs: string;
   name: string;
   depth: number;
-  item?: any; // item folha original
+  item?: any;
   children: CronoNode[];
 };
 
@@ -250,7 +305,6 @@ function wbsCompare(a: string, b: string): number {
 
 function parseDescricao(desc: string): { wbs: string; name: string; chain: { wbs: string; name: string }[] } {
   const s = (desc || "").trim();
-  // Separa o sufixo de contexto entre colchetes
   const ctxMatch = s.match(/\s+·\s+\[(.+)\]\s*$/);
   const head = ctxMatch ? s.slice(0, ctxMatch.index).trim() : s;
   const chainStr = ctxMatch?.[1] ?? "";
@@ -280,13 +334,11 @@ function buildTree(itens: any[]): CronoNode[] {
 
   for (const it of itens) {
     const { wbs, name, chain } = parseDescricao(String(it.descricao ?? ""));
-    // garante todos os pais
     for (const p of chain) ensure(p.wbs, p.name);
     const leaf = ensure(wbs || `__${it.id}`, name || "(sem nome)");
     leaf.item = it;
   }
 
-  // organiza pais/filhos pela cadeia WBS (1.2.3 → pai é 1.2)
   const roots: CronoNode[] = [];
   const nodes = Array.from(byWbs.values()).sort((a, b) => wbsCompare(a.wbs, b.wbs));
   for (const n of nodes) {
@@ -301,7 +353,6 @@ function buildTree(itens: any[]): CronoNode[] {
     }
     roots.push(n);
   }
-  // ordena filhos
   const sortRec = (n: CronoNode) => {
     n.children.sort((a, b) => wbsCompare(a.wbs, b.wbs));
     n.children.forEach(sortRec);
@@ -311,33 +362,40 @@ function buildTree(itens: any[]): CronoNode[] {
   return roots;
 }
 
-function aggregate(n: CronoNode): { custo: number; pct: number; inicio?: string; fim?: string } {
+function aggregate(n: CronoNode, valorContrato: number): { custo: number; pct: number; executado: number; base: number; inicio?: string; fim?: string } {
+  const leafCompute = (item: any) => {
+    const custo = Number(item.custo || 0);
+    const pct = Number(item.percentual_previsto || 0);
+    const base = custo > 0 ? custo : (pct / 100) * valorContrato;
+    const pctReal = Number(item.percentual_realizado || 0);
+    return { custo, pct, base, executado: (base * pctReal) / 100, inicio: item.data_inicio, fim: item.data_fim };
+  };
+
   if (n.item && n.children.length === 0) {
-    return {
-      custo: Number(n.item.custo || 0),
-      pct: Number(n.item.percentual_previsto || 0),
-      inicio: n.item.data_inicio,
-      fim: n.item.data_fim,
-    };
+    return leafCompute(n.item);
   }
-  let custo = 0;
-  let pct = 0;
+  let custo = 0, pct = 0, base = 0, executado = 0;
   let inicio: string | undefined;
   let fim: string | undefined;
   for (const c of n.children) {
-    const a = aggregate(c);
+    const a = aggregate(c, valorContrato);
     custo += a.custo;
     pct += a.pct;
+    base += a.base;
+    executado += a.executado;
     if (a.inicio && (!inicio || a.inicio < inicio)) inicio = a.inicio;
     if (a.fim && (!fim || a.fim > fim)) fim = a.fim;
   }
   if (n.item) {
-    custo += Number(n.item.custo || 0);
-    pct += Number(n.item.percentual_previsto || 0);
-    if (n.item.data_inicio && (!inicio || n.item.data_inicio < inicio)) inicio = n.item.data_inicio;
-    if (n.item.data_fim && (!fim || n.item.data_fim > fim)) fim = n.item.data_fim;
+    const l = leafCompute(n.item);
+    custo += l.custo;
+    pct += l.pct;
+    base += l.base;
+    executado += l.executado;
+    if (l.inicio && (!inicio || l.inicio < inicio)) inicio = l.inicio;
+    if (l.fim && (!fim || l.fim > fim)) fim = l.fim;
   }
-  return { custo, pct, inicio, fim };
+  return { custo, pct, base, executado, inicio, fim };
 }
 
 function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]; valorContrato: number; onRemove: (id: string) => void }) {
@@ -375,6 +433,9 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
           <TableHead className="whitespace-nowrap">Período</TableHead>
           <TableHead className="text-right">% previsto</TableHead>
           <TableHead className="text-right">Valor</TableHead>
+          <TableHead className="text-right">% Real.</TableHead>
+          <TableHead className="text-right">Executado</TableHead>
+          <TableHead className="text-right">Saldo físico</TableHead>
           <TableHead></TableHead>
         </TableRow>
       </TableHeader>
@@ -382,14 +443,13 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
         {rows.map(({ node, depth }) => {
           const isLeaf = node.children.length === 0;
           const isCollapsed = collapsed.has(node.wbs);
-          const agg = isLeaf
-            ? { custo: Number(node.item?.custo || 0), pct: Number(node.item?.percentual_previsto || 0), inicio: node.item?.data_inicio, fim: node.item?.data_fim }
-            : aggregate(node);
-          // Valor: usa custo importado (fonte da verdade); cai para pct*contrato se custo=0.
-          const valor = agg.custo > 0 ? agg.custo : (agg.pct / 100) * valorContrato;
-          const pctExibir = agg.custo > 0 && valorContrato > 0
-            ? (agg.custo / valorContrato) * 100
+          const agg = aggregate(node, valorContrato);
+          const valor = agg.base;
+          const pctExibir = valorContrato > 0 && agg.base > 0
+            ? (agg.base / valorContrato) * 100
             : agg.pct;
+          const pctReal = agg.base > 0 ? (agg.executado / agg.base) * 100 : 0;
+          const saldo = valor - agg.executado;
 
           return (
             <TableRow key={node.wbs || node.item?.id} className={!isLeaf ? "bg-muted/40" : ""}>
@@ -422,6 +482,15 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
               <TableCell className={`text-right whitespace-nowrap ${!isLeaf ? "text-muted-foreground italic" : ""}`}>
                 {valor ? brl(valor) : "—"}
               </TableCell>
+              <TableCell className={`text-right ${pctReal > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}`}>
+                {pctReal > 0 ? pctReal.toFixed(2) + "%" : "—"}
+              </TableCell>
+              <TableCell className="text-right whitespace-nowrap">
+                {agg.executado > 0 ? brl(agg.executado) : "—"}
+              </TableCell>
+              <TableCell className="text-right whitespace-nowrap text-muted-foreground">
+                {valor > 0 ? brl(saldo) : "—"}
+              </TableCell>
               <TableCell className="text-right">
                 {isLeaf && node.item && (
                   <Button variant="ghost" size="sm" onClick={() => onRemove(node.item.id)}>Remover</Button>
@@ -435,26 +504,118 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
   );
 }
 
+// ============== Medições por item ==============
 
+type LeafRow = {
+  item: any;
+  pctAnterior: number;
+  pctAtual: number;
+  base: number;
+};
 
-
-function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes: any[]; receb: any[]; onChange: () => void }) {
+function MedicoesTab({
+  obra, crono, medicoes, itensMedicao, onChange,
+}: {
+  obra: any;
+  crono: any[];
+  medicoes: any[];
+  itensMedicao: any[];
+  onChange: () => void;
+}) {
+  const valorContrato = Number(obra.valor_contrato || 0);
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState<any>({});
+  const [form, setForm] = useState<{ numero: string; data_inicio: string; data_corte: string; observacoes: string }>({
+    numero: "", data_inicio: "", data_corte: "", observacoes: "",
+  });
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    const { error } = await supabase.from("medicoes").insert({
-      obra_id: obra.id,
-      numero: f.numero,
-      data_corte: f.data_corte,
-      valor: Number(f.valor || 0),
-      percentual: f.percentual ? Number(f.percentual) : null,
-      status: "rascunho",
+  // Folhas do cronograma (sem filhos)
+  const leaves = useMemo(() => {
+    const roots = buildTree(crono);
+    const out: any[] = [];
+    const walk = (n: CronoNode) => {
+      if (n.children.length === 0 && n.item) out.push(n.item);
+      else for (const c of n.children) walk(c);
+    };
+    roots.forEach(walk);
+    return out.length > 0 ? out : crono.filter((c) => c); // fallback se não conseguir parsear
+  }, [crono]);
+
+  const [linhas, setLinhas] = useState<LeafRow[]>([]);
+
+  function abrirNova() {
+    const rows: LeafRow[] = leaves.map((item) => {
+      const custo = Number(item.custo || 0);
+      const base = custo > 0 ? custo : (Number(item.percentual_previsto || 0) / 100) * valorContrato;
+      const pctAnterior = Number(item.percentual_realizado || 0);
+      return { item, pctAnterior, pctAtual: pctAnterior, base };
     });
-    if (error) return toast.error(error.message);
-    toast.success("Medição criada");
-    setOpen(false); setF({});
+    setLinhas(rows);
+    setForm({ numero: "", data_inicio: "", data_corte: "", observacoes: "" });
+    setOpen(true);
+  }
+
+  function setPctAtual(idx: number, v: number) {
+    setLinhas((ls) => ls.map((l, i) => i === idx ? { ...l, pctAtual: v } : l));
+  }
+
+  const totalPeriodo = linhas.reduce((acc, l) => acc + (l.base * (l.pctAtual - l.pctAnterior)) / 100, 0);
+  const acumAnterior = linhas.reduce((acc, l) => acc + (l.base * l.pctAnterior) / 100, 0);
+  const acumApos = linhas.reduce((acc, l) => acc + (l.base * l.pctAtual) / 100, 0);
+  const temErro = linhas.some((l) => l.pctAtual < l.pctAnterior);
+
+  async function salvar() {
+    if (!form.numero) return toast.error("Informe o número da medição");
+    if (!form.data_corte) return toast.error("Informe a data de corte");
+    if (temErro) return toast.error("Há itens com % atual menor que % anterior");
+
+    const valorTotal = totalPeriodo;
+
+    const { data: med, error: medErr } = await supabase
+      .from("medicoes")
+      .insert({
+        obra_id: obra.id,
+        numero: form.numero,
+        data_inicio: form.data_inicio || null,
+        data_corte: form.data_corte,
+        valor: valorTotal,
+        status: "rascunho",
+        observacoes: form.observacoes || null,
+      })
+      .select()
+      .single();
+
+    if (medErr || !med) return toast.error(medErr?.message ?? "Erro ao criar medição");
+
+    const comExecucao = linhas.filter((l) => l.pctAtual > l.pctAnterior);
+
+    if (comExecucao.length > 0) {
+      const itensMed = comExecucao.map((l) => ({
+        medicao_id: med.id,
+        cronograma_item_id: l.item.id,
+        percentual_anterior: l.pctAnterior,
+        percentual_atual: l.pctAtual,
+        valor_anterior: (l.base * l.pctAnterior) / 100,
+        valor_atual: (l.base * l.pctAtual) / 100,
+      }));
+
+      const { error: itmErr } = await supabase.from("itens_medicao").insert(itensMed);
+      if (itmErr) {
+        await supabase.from("medicoes").delete().eq("id", med.id);
+        return toast.error(`Erro ao salvar itens: ${itmErr.message}`);
+      }
+
+      await Promise.all(
+        comExecucao.map((l) =>
+          supabase
+            .from("cronograma_itens")
+            .update({ percentual_realizado: l.pctAtual })
+            .eq("id", l.item.id),
+        ),
+      );
+    }
+
+    toast.success(`Medição ${form.numero} criada · ${brl(valorTotal)}`);
+    setOpen(false);
     onChange();
   }
 
@@ -466,46 +627,234 @@ function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes:
     onChange();
   }
 
-
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Medições</CardTitle>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-2" />Medição</Button></DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Nova medição</DialogTitle></DialogHeader>
-            <form onSubmit={save} className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5"><Label>Número *</Label><Input required value={f.numero ?? ""} onChange={(e) => setF({ ...f, numero: e.target.value })} placeholder="1ª, 2ª, BMS 03…" /></div>
-              <div className="space-y-1.5"><Label>Data de corte *</Label><Input type="date" required value={f.data_corte ?? ""} onChange={(e) => setF({ ...f, data_corte: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Valor (R$) *</Label><Input type="number" step="0.01" required value={f.valor ?? ""} onChange={(e) => setF({ ...f, valor: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>% acumulado</Label><Input type="number" step="0.01" value={f.percentual ?? ""} onChange={(e) => setF({ ...f, percentual: e.target.value })} /></div>
-              <DialogFooter className="col-span-2"><Button type="submit">Salvar</Button></DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetTrigger asChild>
+            <Button size="sm" onClick={abrirNova}><Plus className="h-4 w-4 mr-2" />Medição</Button>
+          </SheetTrigger>
+          <SheetContent side="right" className="w-full sm:max-w-4xl overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>Nova medição</SheetTitle>
+            </SheetHeader>
+
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Número *</Label>
+                  <Input value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} placeholder="BMS 11" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Data início *</Label>
+                  <Input type="date" value={form.data_inicio} onChange={(e) => setForm({ ...form, data_inicio: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Data corte/fim *</Label>
+                  <Input type="date" value={form.data_corte} onChange={(e) => setForm({ ...form, data_corte: e.target.value })} />
+                </div>
+                <div className="space-y-1.5 col-span-3">
+                  <Label>Observações</Label>
+                  <Textarea value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} />
+                </div>
+              </div>
+
+              {linhas.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  Importe um cronograma para a obra antes de medir.
+                </p>
+              ) : (
+                <div className="border rounded-md">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-20">EDT</TableHead>
+                        <TableHead>Descrição</TableHead>
+                        <TableHead className="text-right">Base (R$)</TableHead>
+                        <TableHead className="text-right">% Anterior</TableHead>
+                        <TableHead className="text-right w-32">% Atual</TableHead>
+                        <TableHead className="text-right">% Período</TableHead>
+                        <TableHead className="text-right">Valor Período</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {linhas.map((l, idx) => {
+                        const pctPeriodo = l.pctAtual - l.pctAnterior;
+                        const valorPeriodo = (l.base * pctPeriodo) / 100;
+                        const erro = l.pctAtual < l.pctAnterior;
+                        const exec = l.pctAtual > l.pctAnterior;
+                        const parsed = parseDescricao(String(l.item.descricao ?? ""));
+                        return (
+                          <TableRow key={l.item.id}>
+                            <TableCell className="font-mono text-xs text-muted-foreground">{parsed.wbs || "—"}</TableCell>
+                            <TableCell className="text-sm">{parsed.name || l.item.descricao}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap text-xs">{brl(l.base)}</TableCell>
+                            <TableCell className="text-right text-xs text-muted-foreground">{l.pctAnterior.toFixed(2)}%</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center gap-1 justify-end">
+                                <Input
+                                  type="number"
+                                  step="0.001"
+                                  min={l.pctAnterior}
+                                  max={100}
+                                  value={l.pctAtual}
+                                  onChange={(e) => setPctAtual(idx, Number(e.target.value))}
+                                  className={`h-8 w-24 text-right ${exec ? "border-green-500 bg-green-50 dark:bg-green-950/20" : ""} ${erro ? "border-destructive" : ""}`}
+                                />
+                                {erro && <AlertCircle className="h-3 w-3 text-destructive" />}
+                              </div>
+                            </TableCell>
+                            <TableCell className={`text-right text-xs ${exec ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}`}>
+                              {pctPeriodo > 0 ? `+${pctPeriodo.toFixed(2)}%` : pctPeriodo === 0 ? "—" : `${pctPeriodo.toFixed(2)}%`}
+                            </TableCell>
+                            <TableCell className={`text-right whitespace-nowrap text-xs ${exec ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}`}>
+                              {valorPeriodo !== 0 ? brl(valorPeriodo) : "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                  <div className="border-t bg-muted/30 px-4 py-3 space-y-1 sticky bottom-0">
+                    <div className="flex justify-between items-center font-semibold">
+                      <span>Total desta medição:</span>
+                      <span className={totalPeriodo > 0 ? "text-green-600 dark:text-green-400" : ""}>{brl(totalPeriodo)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Acumulado anterior:</span>
+                      <span>{brl(acumAnterior)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Acumulado após:</span>
+                      <span>{brl(acumApos)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {totalPeriodo === 0 && linhas.length > 0 && (
+                <p className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Nenhum serviço foi executado neste período.
+                </p>
+              )}
+              {temErro && (
+                <p className="text-sm text-destructive flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Há itens com % atual menor que % anterior — corrija antes de salvar.
+                </p>
+              )}
+            </div>
+
+            <SheetFooter className="mt-6">
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+              <Button onClick={salvar} disabled={temErro || !form.numero || !form.data_corte}>Salvar medição</Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
       </CardHeader>
       <CardContent>
         <Table>
-          <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Corte</TableHead><TableHead>Valor</TableHead><TableHead>%</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nº</TableHead>
+              <TableHead>Período</TableHead>
+              <TableHead className="text-right">Valor</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
           <TableBody>
             {medicoes.map((m) => (
-              <TableRow key={m.id}>
-                <TableCell>{m.numero}</TableCell>
-                <TableCell>{format(parseISO(m.data_corte), "dd/MM/yy")}</TableCell>
-                <TableCell>{brl(m.valor)}</TableCell>
-                <TableCell>{m.percentual ? `${Number(m.percentual).toFixed(2)}%` : "—"}</TableCell>
-                <TableCell><StatusBadge status={m.status} /></TableCell>
-                <TableCell className="text-right">
-                  {m.status !== "aprovada" && <Button size="sm" variant="outline" onClick={() => aprovar(m)}><CheckCircle2 className="h-3 w-3 mr-1" />Aprovar</Button>}
-                </TableCell>
-              </TableRow>
+              <MedicaoRow
+                key={m.id}
+                m={m}
+                itens={itensMedicao.filter((im) => im.medicao_id === m.id)}
+                valorContrato={valorContrato}
+                onAprovar={() => aprovar(m)}
+              />
             ))}
-            {medicoes.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Sem medições</TableCell></TableRow>}
+            {medicoes.length === 0 && (
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem medições</TableCell></TableRow>
+            )}
           </TableBody>
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+function MedicaoRow({ m, itens, valorContrato, onAprovar }: { m: any; itens: any[]; valorContrato: number; onAprovar: () => void }) {
+  const [open, setOpen] = useState(false);
+  const periodo = m.data_inicio
+    ? `${format(parseISO(m.data_inicio), "dd/MM/yy")} – ${format(parseISO(m.data_corte), "dd/MM/yy")}`
+    : format(parseISO(m.data_corte), "dd/MM/yy");
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="font-medium">{m.numero}</TableCell>
+        <TableCell className="text-xs">{periodo}</TableCell>
+        <TableCell className="text-right whitespace-nowrap">{brl(m.valor)}</TableCell>
+        <TableCell><StatusBadge status={m.status} /></TableCell>
+        <TableCell className="text-right whitespace-nowrap">
+          <Collapsible open={open} onOpenChange={setOpen}>
+            <CollapsibleTrigger asChild>
+              <Button size="sm" variant="ghost">
+                {open ? <ChevronDown className="h-3 w-3 mr-1" /> : <ChevronRight className="h-3 w-3 mr-1" />}
+                Ver itens ({itens.length})
+              </Button>
+            </CollapsibleTrigger>
+          </Collapsible>
+          {m.status !== "aprovada" && <Button size="sm" variant="outline" onClick={onAprovar}><CheckCircle2 className="h-3 w-3 mr-1" />Aprovar</Button>}
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={5} className="bg-muted/30 p-0">
+            <div className="px-4 py-3">
+              {itens.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Esta medição não possui itens detalhados.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-20">EDT</TableHead>
+                      <TableHead>Descrição</TableHead>
+                      <TableHead className="text-right">% Anterior</TableHead>
+                      <TableHead className="text-right">% Atual</TableHead>
+                      <TableHead className="text-right">% Período</TableHead>
+                      <TableHead className="text-right">Valor Período</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {itens.map((im) => {
+                      const ci = im.cronograma_itens;
+                      const custo = Number(ci?.custo || 0);
+                      const base = custo > 0 ? custo : (Number(ci?.percentual_previsto || 0) / 100) * valorContrato;
+                      const pctPer = Number(im.percentual_atual) - Number(im.percentual_anterior);
+                      const valorPeriodo = (base * pctPer) / 100;
+                      const parsed = ci ? parseDescricao(String(ci.descricao ?? "")) : { wbs: "", name: "—" };
+                      return (
+                        <TableRow key={im.id}>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{parsed.wbs || "—"}</TableCell>
+                          <TableCell className="text-sm">{parsed.name}</TableCell>
+                          <TableCell className="text-right text-xs">{Number(im.percentual_anterior).toFixed(2)}%</TableCell>
+                          <TableCell className="text-right text-xs">{Number(im.percentual_atual).toFixed(2)}%</TableCell>
+                          <TableCell className="text-right text-xs text-green-600 dark:text-green-400">+{pctPer.toFixed(2)}%</TableCell>
+                          <TableCell className="text-right text-xs whitespace-nowrap">{brl(valorPeriodo)}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 
@@ -564,7 +913,6 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
     window.open(data.signedUrl, "_blank");
   }
 
-
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -593,18 +941,28 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       </CardHeader>
       <CardContent>
         <Table>
-          <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Emissão</TableHead><TableHead>Valor</TableHead><TableHead>Vencimento</TableHead><TableHead>PDF</TableHead></TableRow></TableHeader>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nº</TableHead>
+              <TableHead>Emissão</TableHead>
+              <TableHead className="text-right">Valor</TableHead>
+              <TableHead className="text-right">Líquido</TableHead>
+              <TableHead>Vencimento</TableHead>
+              <TableHead>PDF</TableHead>
+            </TableRow>
+          </TableHeader>
           <TableBody>
             {nfs.map((n) => (
               <TableRow key={n.id}>
                 <TableCell>{n.numero ?? "—"}</TableCell>
                 <TableCell>{n.data_emissao ? format(parseISO(n.data_emissao), "dd/MM/yy") : "—"}</TableCell>
-                <TableCell>{brl(n.valor)}</TableCell>
+                <TableCell className="text-right whitespace-nowrap">{brl(n.valor)}</TableCell>
+                <TableCell className="text-right whitespace-nowrap">{brl(n.valor_liquido ?? n.valor)}</TableCell>
                 <TableCell>{n.data_vencimento ? format(parseISO(n.data_vencimento), "dd/MM/yy") : "—"}</TableCell>
                 <TableCell>{n.pdf_url ? <Button size="sm" variant="ghost" onClick={() => abrirPdf(n.pdf_url!)}>Ver</Button> : "—"}</TableCell>
               </TableRow>
             ))}
-            {nfs.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}
+            {nfs.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}
           </TableBody>
         </Table>
       </CardContent>
@@ -666,10 +1024,7 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="secondary" className={m[status] ?? ""}>{status}</Badge>;
 }
 
-// Recalcula previsões futuras após emissão de NF.
-// Saldo = valor do contrato - soma das NFs emitidas. Distribui proporcionalmente
-// entre parcelas previstas sem NF, sem recebimento e não congeladas.
-async function recalcularPrevisaoNF(obraId: string, valorContrato: number) {
+export async function recalcularPrevisaoNF(obraId: string, valorContrato: number) {
   const [{ data: nfs }, { data: receb }] = await Promise.all([
     supabase.from("notas_fiscais").select("valor").eq("obra_id", obraId),
     supabase.from("recebimentos").select("*").eq("obra_id", obraId),
@@ -802,5 +1157,3 @@ function PrevisaoTab({ obra, crono, receb, nfs, onChange }: { obra: any; crono: 
     </div>
   );
 }
-
-

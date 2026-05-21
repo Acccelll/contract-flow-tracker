@@ -684,4 +684,254 @@ function dias(start: string, end: string): number {
   return Math.max(0, Math.round((b - a) / (1000 * 60 * 60 * 24)));
 }
 
+// ============== NFS-e (Excel) ==============
+
+type NfseRow = {
+  numero: string;
+  codigo_obra: string;
+  data_emissao?: string;
+  competencia?: string;
+  valor_servicos: number;
+  inss_retido: number;
+  iss_retido: number;
+  outras_retencoes: number;
+  valor_liquido: number;
+  tomador_nome?: string;
+  tomador_cnpj?: string;
+  codigo_verificacao?: string;
+  // resolvidos durante preview:
+  obra_id?: string;
+  obra_label?: string;
+  status: "ok" | "obra_nao_encontrada" | "duplicada" | "sem_chave";
+  motivo?: string;
+};
+
+function NfseImporter() {
+  const [rows, setRows] = useState<NfseRow[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState<{ inseridas: number; ignoradas: number } | null>(null);
+  const [filtro, setFiltro] = useState<"todas" | "ok" | "ignoradas">("todas");
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDone(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const XLSX = await import("xlsx");
+        const wb = XLSX.read(ev.target?.result, { type: "binary", cellDates: true });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+        // mapa de obras por código
+        const { data: obras } = await supabase.from("obras").select("id, codigo, nome");
+        const mapaObras = new Map<string, { id: string; nome: string; codigo: string }>();
+        obras?.forEach((o) => mapaObras.set(String(o.codigo).trim().toLowerCase(), o));
+
+        // chaves de NFs já existentes (numero + obra_id)
+        const { data: existentes } = await supabase.from("notas_fiscais").select("numero, obra_id");
+        const chaves = new Set<string>();
+        existentes?.forEach((n) => { if (n.numero) chaves.add(`${n.obra_id}::${String(n.numero).trim()}`); });
+
+        const parsed: NfseRow[] = json.map((r) => {
+          const numero = String(pick(r, ["numero nfs-e", "número nfs-e", "numero nfse", "número nfse", "numero da nfs", "numero nf"]) ?? "").trim();
+          const codigo_obra = String(pick(r, ["cod. obra (interno)", "cod obra (interno)", "código obra (interno)", "cod obra interno", "cod. obra"]) ?? "").trim();
+          const data_emissao = dateStr(pick(r, ["data emiss", "emissao", "emissão"]), XLSX);
+          const competencia = dateStr(pick(r, ["compet"]), XLSX);
+          const valor_servicos = num(pick(r, ["valor dos serv", "valor servic", "valor do serv"]));
+          const inss_retido = num(pick(r, ["inss"]));
+          const iss_retido = num(pick(r, ["iss retido", "iss"]));
+          const outras_retencoes = num(pick(r, ["outras reten", "retenc"]));
+          let valor_liquido = num(pick(r, ["valor liquido", "valor líquido", "líquido", "liquido"]));
+          if (!valor_liquido && valor_servicos) {
+            valor_liquido = Math.max(0, valor_servicos - inss_retido - iss_retido - outras_retencoes);
+          }
+          const tomador_nome = String(pick(r, ["tomador nome", "razao social tomador", "razão social tomador", "tomador"]) ?? "").trim() || undefined;
+          const tomador_cnpj = String(pick(r, ["tomador cnpj", "cnpj tomador", "cnpj/cpf tomador"]) ?? "").trim() || undefined;
+          const codigo_verificacao = String(pick(r, ["codigo de verif", "código de verif", "cod. verif", "cod verif"]) ?? "").trim() || undefined;
+
+          const base: NfseRow = {
+            numero, codigo_obra, data_emissao, competencia,
+            valor_servicos, inss_retido, iss_retido, outras_retencoes, valor_liquido,
+            tomador_nome, tomador_cnpj, codigo_verificacao,
+            status: "ok",
+          };
+
+          if (!numero || !codigo_obra) { base.status = "sem_chave"; base.motivo = "Sem nº NFS-e ou código da obra"; return base; }
+          const obra = mapaObras.get(codigo_obra.toLowerCase());
+          if (!obra) { base.status = "obra_nao_encontrada"; base.motivo = `Obra ${codigo_obra} não cadastrada`; return base; }
+          base.obra_id = obra.id;
+          base.obra_label = `${obra.codigo} — ${obra.nome}`;
+          if (chaves.has(`${obra.id}::${numero}`)) { base.status = "duplicada"; base.motivo = "NF já importada"; return base; }
+          return base;
+        }).filter((r) => r.numero || r.codigo_obra || r.valor_servicos);
+
+        setRows(parsed);
+        const okCount = parsed.filter((r) => r.status === "ok").length;
+        toast.success(`${parsed.length} linhas lidas · ${okCount} prontas para importar`);
+      } catch (err: any) {
+        toast.error(`Erro ao ler planilha: ${err.message}`);
+      }
+    };
+    reader.readAsBinaryString(file);
+  }
+
+  async function importar() {
+    const aImportar = rows.filter((r) => r.status === "ok");
+    if (aImportar.length === 0) return toast.error("Nenhuma linha pronta para importar");
+    setImporting(true);
+    try {
+      let inseridas = 0;
+      const obrasAfetadas = new Set<string>();
+      for (const r of aImportar) {
+        if (!r.obra_id) continue;
+        const { error } = await supabase.from("notas_fiscais").insert({
+          obra_id: r.obra_id,
+          numero: r.numero,
+          data_emissao: r.data_emissao ?? null,
+          competencia: r.competencia ?? null,
+          valor: r.valor_servicos,
+          valor_servicos: r.valor_servicos,
+          inss_retido: r.inss_retido,
+          iss_retido: r.iss_retido,
+          outras_retencoes: r.outras_retencoes,
+          valor_liquido: r.valor_liquido,
+          tomador_nome: r.tomador_nome ?? null,
+          tomador_cnpj: r.tomador_cnpj ?? null,
+          codigo_verificacao: r.codigo_verificacao ?? null,
+        });
+        if (error) { console.warn(`NF ${r.numero} pulada: ${error.message}`); continue; }
+        inseridas++;
+        obrasAfetadas.add(r.obra_id);
+      }
+
+      // Recalcula previsão de recebimentos das obras afetadas
+      const { data: obrasInfo } = await supabase
+        .from("obras")
+        .select("id, valor_contrato")
+        .in("id", Array.from(obrasAfetadas));
+      for (const o of obrasInfo ?? []) {
+        try { await recalcularPrevisaoNF(o.id, Number(o.valor_contrato || 0)); } catch (err) { console.warn(err); }
+      }
+
+      const ignoradas = rows.length - inseridas;
+      setDone({ inseridas, ignoradas });
+      toast.success(`${inseridas} NFs importadas (${ignoradas} ignoradas)`);
+      setRows([]);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const okRows = rows.filter((r) => r.status === "ok");
+  const skipRows = rows.filter((r) => r.status !== "ok");
+  const visible = filtro === "ok" ? okRows : filtro === "ignoradas" ? skipRows : rows;
+  const totalServicos = okRows.reduce((a, r) => a + r.valor_servicos, 0);
+  const totalLiquido = okRows.reduce((a, r) => a + r.valor_liquido, 0);
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><FileText className="h-4 w-4" /> Importar NFS-e (Excel)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Planilha (.xlsx, .xls, .csv)</Label>
+            <Input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Colunas reconhecidas: <code>Numero NFS-e, Cod. Obra (INTERNO), Data Emissão, Competência, Valor dos Serviços, INSS, ISS Retido, Outras Retenções, Valor Líquido, Tomador (Nome/CNPJ), Código de Verificação</code>.
+            Linhas sem nº NFS-e ou código da obra, obras não cadastradas e NFs duplicadas (mesmo número na mesma obra) são ignoradas silenciosamente. Registros existentes nunca são atualizados.
+          </p>
+        </CardContent>
+      </Card>
+
+      {rows.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
+            <div>
+              <CardTitle>Pré-visualização ({rows.length})</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {okRows.length} prontas · {skipRows.length} ignoradas · Total serviços (a importar): <strong>{brl(totalServicos)}</strong> · Líquido: <strong>{brl(totalLiquido)}</strong>
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap items-center">
+              <Select value={filtro} onValueChange={(v) => setFiltro(v as any)}>
+                <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas</SelectItem>
+                  <SelectItem value="ok">Somente prontas</SelectItem>
+                  <SelectItem value="ignoradas">Somente ignoradas</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button onClick={importar} disabled={importing || okRows.length === 0}>
+                <Upload className="h-4 w-4 mr-2" />{importing ? "Importando…" : `Importar ${okRows.length} NFs`}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="overflow-auto">
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Status</TableHead>
+                <TableHead>Nº NFS-e</TableHead>
+                <TableHead>Obra</TableHead>
+                <TableHead>Emissão</TableHead>
+                <TableHead className="text-right">Serviços</TableHead>
+                <TableHead className="text-right">INSS</TableHead>
+                <TableHead className="text-right">ISS</TableHead>
+                <TableHead className="text-right">Outras</TableHead>
+                <TableHead className="text-right">Líquido</TableHead>
+                <TableHead>Tomador</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {visible.map((r, i) => (
+                  <TableRow key={i} className={r.status !== "ok" ? "opacity-60" : ""}>
+                    <TableCell>
+                      {r.status === "ok" ? (
+                        <Badge variant="secondary" className="text-green-700 dark:text-green-300">OK</Badge>
+                      ) : (
+                        <Badge variant="outline" title={r.motivo}>
+                          {r.status === "duplicada" ? "Duplicada" : r.status === "obra_nao_encontrada" ? "Sem obra" : "Sem chave"}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{r.numero || "—"}</TableCell>
+                    <TableCell className="text-xs">{r.obra_label ?? r.codigo_obra ?? "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">
+                      {r.data_emissao ? (() => { try { return parseISO(r.data_emissao).toLocaleDateString("pt-BR"); } catch { return r.data_emissao; } })() : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">{brl(r.valor_servicos)}</TableCell>
+                    <TableCell className="text-right">{r.inss_retido ? brl(r.inss_retido) : "—"}</TableCell>
+                    <TableCell className="text-right">{r.iss_retido ? brl(r.iss_retido) : "—"}</TableCell>
+                    <TableCell className="text-right">{r.outras_retencoes ? brl(r.outras_retencoes) : "—"}</TableCell>
+                    <TableCell className="text-right font-medium">{brl(r.valor_liquido)}</TableCell>
+                    <TableCell className="text-xs">{r.tomador_nome ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {done && (
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-2 text-green-700 dark:text-green-300">
+            <CheckCircle2 className="h-4 w-4" />
+            {done.inseridas} NFs importadas · {done.ignoradas} ignoradas.
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// Suprime warning de import não usado em builds onde calcularVencimento ainda não é usado neste arquivo
+void calcularVencimento;
+
+
 

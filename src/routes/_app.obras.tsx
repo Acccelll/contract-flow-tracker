@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +18,8 @@ export const Route = createFileRoute("/_app/obras")({ component: ObrasPage });
 
 function ObrasPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const path = useRouterState({ select: (s) => s.location.pathname });
   const { data: obras } = useQuery({
     queryKey: ["obras"],
     queryFn: async () => (await supabase.from("obras").select("*, clientes(nome)").order("codigo")).data ?? [],
@@ -29,6 +31,8 @@ function ObrasPage() {
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<any>({});
+
+  if (path !== "/obras") return <Outlet />;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -116,7 +120,7 @@ function ObrasPage() {
             </TableHeader>
             <TableBody>
               {(obras ?? []).map((o: any) => (
-                <TableRow key={o.id} className="cursor-pointer" onClick={() => null}>
+                <TableRow key={o.id} className="cursor-pointer" onClick={() => navigate({ to: "/obras/$id", params: { id: o.id } })}>
                   <TableCell>
                     <Link to="/obras/$id" params={{ id: o.id }} className="text-primary underline">{o.codigo}</Link>
                   </TableCell>

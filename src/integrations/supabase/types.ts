@@ -61,6 +61,7 @@ export type Database = {
           obra_id: string
           ordem: number
           percentual_previsto: number
+          percentual_realizado: number
         }
         Insert: {
           created_at?: string
@@ -72,6 +73,7 @@ export type Database = {
           obra_id: string
           ordem?: number
           percentual_previsto?: number
+          percentual_realizado?: number
         }
         Update: {
           created_at?: string
@@ -83,6 +85,7 @@ export type Database = {
           obra_id?: string
           ordem?: number
           percentual_previsto?: number
+          percentual_realizado?: number
         }
         Relationships: [
           {
@@ -94,11 +97,60 @@ export type Database = {
           },
         ]
       }
+      itens_medicao: {
+        Row: {
+          created_at: string
+          cronograma_item_id: string
+          id: string
+          medicao_id: string
+          percentual_anterior: number
+          percentual_atual: number
+          valor_anterior: number
+          valor_atual: number
+        }
+        Insert: {
+          created_at?: string
+          cronograma_item_id: string
+          id?: string
+          medicao_id: string
+          percentual_anterior?: number
+          percentual_atual?: number
+          valor_anterior?: number
+          valor_atual?: number
+        }
+        Update: {
+          created_at?: string
+          cronograma_item_id?: string
+          id?: string
+          medicao_id?: string
+          percentual_anterior?: number
+          percentual_atual?: number
+          valor_anterior?: number
+          valor_atual?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itens_medicao_cronograma_item_id_fkey"
+            columns: ["cronograma_item_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_itens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "itens_medicao_medicao_id_fkey"
+            columns: ["medicao_id"]
+            isOneToOne: false
+            referencedRelation: "medicoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       medicoes: {
         Row: {
           created_at: string
           data_aprovacao: string | null
           data_corte: string
+          data_inicio: string | null
           id: string
           numero: string
           obra_id: string
@@ -112,6 +164,7 @@ export type Database = {
           created_at?: string
           data_aprovacao?: string | null
           data_corte: string
+          data_inicio?: string | null
           id?: string
           numero: string
           obra_id: string
@@ -125,6 +178,7 @@ export type Database = {
           created_at?: string
           data_aprovacao?: string | null
           data_corte?: string
+          data_inicio?: string | null
           id?: string
           numero?: string
           obra_id?: string
@@ -146,43 +200,70 @@ export type Database = {
       }
       notas_fiscais: {
         Row: {
+          codigo_verificacao: string | null
+          competencia: string | null
           created_at: string
           data_emissao: string | null
           data_vencimento: string | null
           id: string
+          inss_retido: number
+          iss_retido: number
           medicao_id: string | null
           numero: string | null
           obra_id: string
           observacoes: string | null
+          outras_retencoes: number
           pdf_url: string | null
+          tomador_cnpj: string | null
+          tomador_nome: string | null
           updated_at: string
           valor: number
+          valor_liquido: number | null
+          valor_servicos: number | null
         }
         Insert: {
+          codigo_verificacao?: string | null
+          competencia?: string | null
           created_at?: string
           data_emissao?: string | null
           data_vencimento?: string | null
           id?: string
+          inss_retido?: number
+          iss_retido?: number
           medicao_id?: string | null
           numero?: string | null
           obra_id: string
           observacoes?: string | null
+          outras_retencoes?: number
           pdf_url?: string | null
+          tomador_cnpj?: string | null
+          tomador_nome?: string | null
           updated_at?: string
           valor?: number
+          valor_liquido?: number | null
+          valor_servicos?: number | null
         }
         Update: {
+          codigo_verificacao?: string | null
+          competencia?: string | null
           created_at?: string
           data_emissao?: string | null
           data_vencimento?: string | null
           id?: string
+          inss_retido?: number
+          iss_retido?: number
           medicao_id?: string | null
           numero?: string | null
           obra_id?: string
           observacoes?: string | null
+          outras_retencoes?: number
           pdf_url?: string | null
+          tomador_cnpj?: string | null
+          tomador_nome?: string | null
           updated_at?: string
           valor?: number
+          valor_liquido?: number | null
+          valor_servicos?: number | null
         }
         Relationships: [
           {

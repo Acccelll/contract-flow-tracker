@@ -11,8 +11,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { brl } from "@/lib/billing";
-import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock } from "lucide-react";
+import { brl, calcularVencimento } from "@/lib/billing";
+import { Badge } from "@/components/ui/badge";
+import { recalcularPrevisaoNF } from "./_app.obras.$id";
+import { parseISO } from "date-fns";
+import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText } from "lucide-react";
 
 export const Route = createFileRoute("/_app/importar")({
   component: Importar,

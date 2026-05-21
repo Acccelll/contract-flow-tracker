@@ -513,7 +513,7 @@ function CronogramaImporter() {
               </Select>
             </div>
           </div>
-          {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas · níveis {niveisPresentes.join(", ")}</p>}
+          {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas · {tasks.filter((t) => !t.hasChildren).length} folhas</p>}
           <label className="flex items-center gap-2 text-sm">
             <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
             Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)

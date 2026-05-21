@@ -383,9 +383,13 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
           const isLeaf = node.children.length === 0;
           const isCollapsed = collapsed.has(node.wbs);
           const agg = isLeaf
-            ? { pct: Number(node.item?.percentual_previsto || 0), inicio: node.item?.data_inicio, fim: node.item?.data_fim }
+            ? { custo: Number(node.item?.custo || 0), pct: Number(node.item?.percentual_previsto || 0), inicio: node.item?.data_inicio, fim: node.item?.data_fim }
             : aggregate(node);
-          const valor = (agg.pct / 100) * valorContrato;
+          // Valor: usa custo importado (fonte da verdade); cai para pct*contrato se custo=0.
+          const valor = agg.custo > 0 ? agg.custo : (agg.pct / 100) * valorContrato;
+          const pctExibir = agg.custo > 0 && valorContrato > 0
+            ? (agg.custo / valorContrato) * 100
+            : agg.pct;
 
           return (
             <TableRow key={node.wbs || node.item?.id} className={!isLeaf ? "bg-muted/40" : ""}>
@@ -413,10 +417,10 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
                   : "—"}
               </TableCell>
               <TableCell className={`text-right ${!isLeaf ? "text-muted-foreground" : ""}`}>
-                {agg.pct ? agg.pct.toFixed(2) + "%" : "—"}
+                {pctExibir ? pctExibir.toFixed(2) + "%" : "—"}
               </TableCell>
               <TableCell className={`text-right whitespace-nowrap ${!isLeaf ? "text-muted-foreground italic" : ""}`}>
-                {agg.pct ? brl(valor) : "—"}
+                {valor ? brl(valor) : "—"}
               </TableCell>
               <TableCell className="text-right">
                 {isLeaf && node.item && (

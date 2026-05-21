@@ -412,6 +412,9 @@ function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]
       </TableBody>
     </Table>
   );
+}
+
+
 
 
 function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes: any[]; receb: any[]; onChange: () => void }) {

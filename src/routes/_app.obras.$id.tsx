@@ -84,19 +84,22 @@ function ObraDetail() {
         </CardContent></Card>
       </div>
 
-      <Tabs defaultValue="cronograma">
+      <Tabs defaultValue="previsao">
         <TabsList>
+          <TabsTrigger value="previsao">Previsão</TabsTrigger>
           <TabsTrigger value="cronograma">Cronograma</TabsTrigger>
           <TabsTrigger value="medicoes">Medições</TabsTrigger>
           <TabsTrigger value="nfs">Faturamento</TabsTrigger>
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="previsao"><PrevisaoTab obra={obra} crono={crono ?? []} receb={receb ?? []} nfs={nfs ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
         <TabsContent value="cronograma"><CronogramaTab obra={obra} itens={crono ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["crono", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="medicoes"><MedicoesTab obra={obra} medicoes={medicoes ?? []} receb={receb ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["medicoes", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
       </Tabs>
+
     </div>
   );
 }
@@ -130,29 +133,53 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
 
   async function gerarPrevisao() {
     if (itens.length === 0) return toast.error("Cadastre o cronograma primeiro");
-    // remove previsões anteriores ainda sem NF e sem recebimento
-    const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento").eq("obra_id", obraId);
-    const apagar = (receb ?? []).filter((r) => !r.nota_fiscal_id && !r.data_recebimento).map((r) => r.id);
+    // remove previsões anteriores ainda sem NF e sem recebimento e não congeladas
+    const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento, congelado").eq("obra_id", obraId);
+    const apagar = (receb ?? []).filter((r: any) => !r.nota_fiscal_id && !r.data_recebimento && !r.congelado).map((r: any) => r.id);
     if (apagar.length) await supabase.from("recebimentos").delete().in("id", apagar);
 
     const prazoNF = Number(obra.prazo_emitir_nf_dias || 0);
-    const linhas = itens.map((i) => {
-      const valor = (Number(i.percentual_previsto) / 100) * valorContrato;
-      const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
-      const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
-      return {
+    const pctAntec = Number(obra.percentual_antecipacao || 0);
+    const linhas: any[] = [];
+
+    // Antecipação (se houver) — recebida no início da obra
+    if (pctAntec > 0 && obra.data_inicio) {
+      const valorAntec = (pctAntec / 100) * valorContrato;
+      const venc = calcularVencimento(parseISO(obra.data_inicio), Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+      linhas.push({
         obra_id: obraId,
         data_prevista: venc.toISOString().slice(0, 10),
+        valor_previsto: valorAntec,
+        valor_previsto_inicial: valorAntec,
+        status: "previsto",
+        origem: "antecipacao",
+        observacoes: `Antecipação ${pctAntec.toFixed(2)}%`,
+      });
+    }
+
+    // valor a distribuir nas janelas = contrato - antecipação
+    const baseDist = valorContrato * (1 - pctAntec / 100);
+    for (const i of itens) {
+      const valor = (Number(i.percentual_previsto) / 100) * baseDist;
+      const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
+      const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+      linhas.push({
+        obra_id: obraId,
+        cronograma_item_id: i.id,
+        data_prevista: venc.toISOString().slice(0, 10),
         valor_previsto: valor,
-        status: "previsto" as const,
+        valor_previsto_inicial: valor,
+        status: "previsto",
+        origem: "cronograma",
         observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${Number(i.percentual_previsto).toFixed(2)}%`,
-      };
-    });
+      });
+    }
     const { error } = await supabase.from("recebimentos").insert(linhas);
     if (error) return toast.error(error.message);
     toast.success(`${linhas.length} parcelas previstas geradas`);
     onChange();
   }
+
 
   return (
     <Card>
@@ -295,8 +322,12 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       nota_fiscal_id: nf.id,
       data_prevista: venc.toISOString().slice(0, 10),
       valor_previsto: valor,
+      valor_previsto_inicial: valor,
       status: "a_receber",
+      origem: "nf",
+      congelado: true,
     });
+
     // recalcular previsão: redistribuir saldo entre parcelas futuras sem NF
     await recalcularPrevisaoNF(obra.id, Number(obra.valor_contrato));
     toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")} · previsão recalculada`);
@@ -405,28 +436,139 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // Recalcula previsões futuras após emissão de NF.
-// Saldo = valor do contrato - soma das NFs emitidas. Esse saldo é redistribuído
-// proporcionalmente entre as parcelas previstas que ainda não têm NF vinculada
-// nem recebimento confirmado.
+// Saldo = valor do contrato - soma das NFs emitidas. Distribui proporcionalmente
+// entre parcelas previstas sem NF, sem recebimento e não congeladas.
 async function recalcularPrevisaoNF(obraId: string, valorContrato: number) {
   const [{ data: nfs }, { data: receb }] = await Promise.all([
     supabase.from("notas_fiscais").select("valor").eq("obra_id", obraId),
     supabase.from("recebimentos").select("*").eq("obra_id", obraId),
   ]);
   const faturado = (nfs ?? []).reduce((a, n) => a + Number(n.valor || 0), 0);
-  const futuras = (receb ?? []).filter((r) => !r.data_recebimento && !r.nota_fiscal_id);
-  const totalFuturo = futuras.reduce((a, r) => a + Number(r.valor_previsto), 0);
+  const futuras = (receb ?? []).filter((r: any) => !r.data_recebimento && !r.nota_fiscal_id && !r.congelado);
+  const totalFuturo = futuras.reduce((a: number, r: any) => a + Number(r.valor_previsto), 0);
   const saldo = Math.max(0, valorContrato - faturado);
   if (futuras.length === 0) return;
   if (totalFuturo === 0) {
-    // distribuir saldo igualmente
     const v = saldo / futuras.length;
-    await Promise.all(futuras.map((r) => supabase.from("recebimentos").update({ valor_previsto: v }).eq("id", r.id)));
+    await Promise.all(futuras.map((r: any) => supabase.from("recebimentos").update({ valor_previsto: v }).eq("id", r.id)));
     return;
   }
-  await Promise.all(futuras.map((r) => {
+  await Promise.all(futuras.map((r: any) => {
     const prop = Number(r.valor_previsto) / totalFuturo;
     return supabase.from("recebimentos").update({ valor_previsto: saldo * prop }).eq("id", r.id);
   }));
 }
+
+function PrevisaoTab({ obra, crono, receb, nfs, onChange }: { obra: any; crono: any[]; receb: any[]; nfs: any[]; onChange: () => void }) {
+  const valorContrato = Number(obra.valor_contrato);
+  const faturado = nfs.reduce((a, n) => a + Number(n.valor || 0), 0);
+  const recebido = receb.filter((r) => r.data_recebimento).reduce((a, r) => a + Number(r.valor_recebido || 0), 0);
+  const previstoTotal = receb.reduce((a, r) => a + Number(r.valor_previsto || 0), 0);
+  const previstoInicialTotal = receb.reduce((a, r) => a + Number(r.valor_previsto_inicial ?? r.valor_previsto ?? 0), 0);
+  const saldo = valorContrato - faturado;
+
+  async function recalcular() {
+    await recalcularPrevisaoNF(obra.id, valorContrato);
+    toast.success("Previsão recalculada");
+    onChange();
+  }
+  async function toggleCongelar(r: any) {
+    await supabase.from("recebimentos").update({ congelado: !r.congelado }).eq("id", r.id);
+    onChange();
+  }
+  async function remover(r: any) {
+    if (r.nota_fiscal_id) return toast.error("Parcela vinculada a NF — apague a NF primeiro");
+    await supabase.from("recebimentos").delete().eq("id", r.id);
+    onChange();
+  }
+
+  const ordenado = [...receb].sort((a, b) => a.data_prevista.localeCompare(b.data_prevista));
+  const diff = valorContrato - previstoTotal - recebido;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card><CardContent className="pt-4"><div className="text-xs text-muted-foreground">Contrato</div><div className="text-lg font-semibold">{brl(valorContrato)}</div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="text-xs text-muted-foreground">Faturado (NFs)</div><div className="text-lg font-semibold">{brl(faturado)}</div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="text-xs text-muted-foreground">Recebido</div><div className="text-lg font-semibold">{brl(recebido)}</div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="text-xs text-muted-foreground">Saldo a faturar</div><div className="text-lg font-semibold">{brl(saldo)}</div></CardContent></Card>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
+          <div>
+            <CardTitle>Previsão de recebimento</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Inicial: {brl(previstoInicialTotal)} · Atual: {brl(previstoTotal)} · {Math.abs(diff) < 1 ? "✓ bate com contrato" : `diferença ${brl(diff)}`}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={recalcular}>Recalcular saldo</Button>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Data prevista</TableHead>
+              <TableHead>Origem</TableHead>
+              <TableHead className="text-right">Previsto inicial</TableHead>
+              <TableHead className="text-right">Previsto atual</TableHead>
+              <TableHead className="text-right">Realizado</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead></TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {ordenado.map((r) => (
+                <TableRow key={r.id} className={r.congelado ? "bg-muted/40" : undefined}>
+                  <TableCell>{format(parseISO(r.data_prevista), "dd/MM/yy")}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{r.origem ?? "manual"}{r.observacoes ? ` · ${r.observacoes}` : ""}</TableCell>
+                  <TableCell className="text-right">{brl(r.valor_previsto_inicial ?? r.valor_previsto)}</TableCell>
+                  <TableCell className="text-right font-medium">{brl(r.valor_previsto)}</TableCell>
+                  <TableCell className="text-right">{r.valor_recebido ? brl(r.valor_recebido) : "—"}</TableCell>
+                  <TableCell><StatusBadge status={r.status} /></TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    <Button size="sm" variant="ghost" onClick={() => toggleCongelar(r)}>{r.congelado ? "Descongelar" : "Congelar"}</Button>
+                    <Button size="sm" variant="ghost" onClick={() => remover(r)}>Remover</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {ordenado.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Gere a previsão na aba Cronograma</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {crono.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Aderência por janela do cronograma</CardTitle></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Período</TableHead>
+                <TableHead className="text-right">Previsto</TableHead>
+                <TableHead className="text-right">Faturado (NFs)</TableHead>
+                <TableHead className="text-right">Aderência</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {crono.map((c) => {
+                  const previsto = (Number(c.percentual_previsto) / 100) * valorContrato;
+                  const fatNoPer = nfs.filter((n) => n.data_emissao && n.data_emissao >= c.data_inicio && n.data_emissao <= c.data_fim)
+                    .reduce((a, n) => a + Number(n.valor || 0), 0);
+                  const ader = previsto > 0 ? (fatNoPer / previsto) * 100 : 0;
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell>{format(parseISO(c.data_inicio), "dd/MM/yy")} – {format(parseISO(c.data_fim), "dd/MM/yy")}</TableCell>
+                      <TableCell className="text-right">{brl(previsto)}</TableCell>
+                      <TableCell className="text-right">{brl(fatNoPer)}</TableCell>
+                      <TableCell className="text-right">{ader.toFixed(1)}%</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 

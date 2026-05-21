@@ -269,6 +269,8 @@ type MppTask = {
   finish?: string;
   isSummary: boolean;
   isMilestone: boolean;
+  parentUid?: string;
+  hasChildren: boolean;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
@@ -280,7 +282,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
     || doc.querySelector("Project > Name")?.textContent?.trim();
 
   const taskNodes = Array.from(doc.querySelectorAll("Project > Tasks > Task"));
-  const tasks: MppTask[] = taskNodes.map((t) => {
+  const raw: MppTask[] = taskNodes.map((t) => {
     const get = (tag: string) => t.querySelector(`:scope > ${tag}`)?.textContent?.trim();
     const start = get("Start");
     const finish = get("Finish");
@@ -292,9 +294,23 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       finish: finish ? finish.slice(0, 10) : undefined,
       isSummary: get("Summary") === "1",
       isMilestone: get("Milestone") === "1",
+      hasChildren: false,
     };
-  });
-  return { titulo, tasks: tasks.filter((t) => t.outlineLevel > 0 && t.name && !t.isSummary) };
+  }).filter((t) => t.outlineLevel > 0 && t.name && !t.isMilestone);
+
+  // calcula parentUid via stack pela ordem do XML
+  const stack: MppTask[] = [];
+  for (const t of raw) {
+    while (stack.length && stack[stack.length - 1].outlineLevel >= t.outlineLevel) stack.pop();
+    t.parentUid = stack[stack.length - 1]?.uid;
+    stack.push(t);
+  }
+  // marca hasChildren
+  const childCount = new Map<string, number>();
+  for (const t of raw) if (t.parentUid) childCount.set(t.parentUid, (childCount.get(t.parentUid) ?? 0) + 1);
+  for (const t of raw) t.hasChildren = (childCount.get(t.uid) ?? 0) > 0;
+
+  return { titulo, tasks: raw };
 }
 
 function CronogramaImporter() {

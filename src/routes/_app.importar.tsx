@@ -534,13 +534,14 @@ function CronogramaImporter() {
             <div>
               <CardTitle>Tarefas do cronograma ({tasks.length})</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {escolhidas.length} selecionadas · soma {totalDias} dias
+                {escolhidas.length} selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
                 {sobreposicoes > 0 && (
                   <span className="ml-2 inline-flex items-center rounded bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 text-[11px]">
                     ⚠ {sobreposicoes} sobreposição{sobreposicoes > 1 ? "ões" : ""} pai/filho — a soma passará de 100%
                   </span>
                 )}
               </p>
+
             </div>
             <div className="flex gap-2 flex-wrap">
               <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren)}>Folhas</Button>

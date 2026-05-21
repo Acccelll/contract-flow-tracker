@@ -548,8 +548,31 @@ function CronogramaImporter() {
             <div>
               <CardTitle>Tarefas do cronograma ({tasks.length})</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {escolhidas.length} folhas selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
+                {escolhidas.length} folhas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
               </p>
+              {obraId && (
+                <p className="text-xs mt-1">
+                  Contrato: <strong>{brl(valorContrato)}</strong> ·{" "}
+                  {valorContrato > 0 ? (
+                    <>
+                      Selecionado cobre{" "}
+                      <strong className={
+                        totalCusto > valorContrato * 1.001
+                          ? "text-destructive"
+                          : totalCusto >= valorContrato * 0.999
+                            ? "text-green-600 dark:text-green-400"
+                            : "text-amber-600 dark:text-amber-400"
+                      }>
+                        {((totalCusto / valorContrato) * 100).toFixed(2)}%
+                      </strong>{" "}
+                      do contrato · diferença {brl(totalCusto - valorContrato)}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">obra sem valor de contrato</span>
+                  )}
+                </p>
+              )}
+
 
             </div>
             <div className="flex gap-2 flex-wrap">

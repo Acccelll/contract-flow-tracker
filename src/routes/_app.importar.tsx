@@ -37,11 +37,10 @@ function num(v: any): number {
   return Number(s) || 0;
 }
 
-function dateStr(v: any): string | undefined {
+function dateStr(v: any, XLSX: any): string | undefined {
   if (!v) return undefined;
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   if (typeof v === "number") {
-    // Excel serial date
     const d = XLSX.SSF.parse_date_code(v);
     if (!d) return undefined;
     return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;

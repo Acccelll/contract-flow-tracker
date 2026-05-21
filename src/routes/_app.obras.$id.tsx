@@ -374,6 +374,7 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5 col-span-2"><Label>PDF da NF</Label><Input type="file" accept="application/pdf" onChange={(e) => setF({ ...f, pdf: e.target.files?.[0] ?? null })} /></div>
               <DialogFooter className="col-span-2"><Button type="submit">Salvar</Button></DialogFooter>
             </form>
           </DialogContent>
@@ -381,7 +382,7 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       </CardHeader>
       <CardContent>
         <Table>
-          <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Emissão</TableHead><TableHead>Valor</TableHead><TableHead>Vencimento</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Emissão</TableHead><TableHead>Valor</TableHead><TableHead>Vencimento</TableHead><TableHead>PDF</TableHead></TableRow></TableHeader>
           <TableBody>
             {nfs.map((n) => (
               <TableRow key={n.id}>
@@ -389,9 +390,10 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
                 <TableCell>{n.data_emissao ? format(parseISO(n.data_emissao), "dd/MM/yy") : "—"}</TableCell>
                 <TableCell>{brl(n.valor)}</TableCell>
                 <TableCell>{n.data_vencimento ? format(parseISO(n.data_vencimento), "dd/MM/yy") : "—"}</TableCell>
+                <TableCell>{n.pdf_url ? <Button size="sm" variant="ghost" onClick={() => abrirPdf(n.pdf_url)}>Ver</Button> : "—"}</TableCell>
               </TableRow>
             ))}
-            {nfs.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}
+            {nfs.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem NFs</TableCell></TableRow>}
           </TableBody>
         </Table>
       </CardContent>

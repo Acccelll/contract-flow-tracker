@@ -294,7 +294,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isMilestone: get("Milestone") === "1",
     };
   });
-  return { titulo, tasks: tasks.filter((t) => t.outlineLevel > 0 && t.name) };
+  return { titulo, tasks: tasks.filter((t) => t.outlineLevel > 0 && t.name && !t.isSummary) };
 }
 
 function CronogramaImporter() {
@@ -304,6 +304,7 @@ function CronogramaImporter() {
   const [obraId, setObraId] = useState<string>("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [importing, setImporting] = useState(false);
+  const [substituir, setSubstituir] = useState<boolean>(true);
   const [done, setDone] = useState<number | null>(null);
 
   const { data: obras } = useQuery({
@@ -352,6 +353,10 @@ function CronogramaImporter() {
     if (escolhidas.length === 0) return toast.error("Nenhuma tarefa selecionada com datas válidas");
     setImporting(true);
     try {
+      if (substituir) {
+        const { error: delErr } = await supabase.from("cronograma_itens").delete().eq("obra_id", obraId);
+        if (delErr) throw delErr;
+      }
       const rows = escolhidas.map((t, i) => ({
         obra_id: obraId,
         descricao: t.name,
@@ -405,8 +410,12 @@ function CronogramaImporter() {
             </div>
           </div>
           {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas no XML · {filtradas.length} no nível {level}</p>}
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
+            Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
+          </label>
           <p className="text-xs text-muted-foreground">
-            % previsto de cada item é calculado proporcionalmente à duração e pode ser ajustado depois no detalhe da obra.
+            % previsto de cada item é calculado proporcionalmente à duração e pode ser ajustado depois no detalhe da obra. Tarefas-resumo (Summary) são ignoradas para não somar com suas subtarefas.
           </p>
         </CardContent>
       </Card>

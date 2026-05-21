@@ -84,19 +84,22 @@ function ObraDetail() {
         </CardContent></Card>
       </div>
 
-      <Tabs defaultValue="cronograma">
+      <Tabs defaultValue="previsao">
         <TabsList>
+          <TabsTrigger value="previsao">Previsão</TabsTrigger>
           <TabsTrigger value="cronograma">Cronograma</TabsTrigger>
           <TabsTrigger value="medicoes">Medições</TabsTrigger>
           <TabsTrigger value="nfs">Faturamento</TabsTrigger>
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="previsao"><PrevisaoTab obra={obra} crono={crono ?? []} receb={receb ?? []} nfs={nfs ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
         <TabsContent value="cronograma"><CronogramaTab obra={obra} itens={crono ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["crono", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="medicoes"><MedicoesTab obra={obra} medicoes={medicoes ?? []} receb={receb ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["medicoes", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
       </Tabs>
+
     </div>
   );
 }

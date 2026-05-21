@@ -780,7 +780,8 @@ function PrevisaoTab({ obra, crono, receb, nfs, onChange }: { obra: any; crono: 
               </TableRow></TableHeader>
               <TableBody>
                 {crono.map((c) => {
-                  const previsto = (Number(c.percentual_previsto) / 100) * valorContrato;
+                  const custoItem = Number(c.custo || 0);
+                  const previsto = custoItem > 0 ? custoItem : (Number(c.percentual_previsto) / 100) * valorContrato;
                   const fatNoPer = nfs.filter((n) => n.data_emissao && n.data_emissao >= c.data_inicio && n.data_emissao <= c.data_fim)
                     .reduce((a, n) => a + Number(n.valor || 0), 0);
                   const ader = previsto > 0 ? (fatNoPer / previsto) * 100 : 0;

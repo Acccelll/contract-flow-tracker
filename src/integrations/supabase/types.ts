@@ -53,6 +53,7 @@ export type Database = {
       cronograma_itens: {
         Row: {
           created_at: string
+          custo: number
           data_fim: string
           data_inicio: string
           descricao: string | null
@@ -63,6 +64,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          custo?: number
           data_fim: string
           data_inicio: string
           descricao?: string | null
@@ -73,6 +75,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          custo?: number
           data_fim?: string
           data_inicio?: string
           descricao?: string | null

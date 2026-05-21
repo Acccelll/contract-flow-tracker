@@ -1,0 +1,1 @@
+ALTER TABLE public.cronograma_itens ADD COLUMN IF NOT EXISTS custo numeric NOT NULL DEFAULT 0;

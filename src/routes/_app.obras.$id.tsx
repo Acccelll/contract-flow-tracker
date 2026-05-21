@@ -133,29 +133,53 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
 
   async function gerarPrevisao() {
     if (itens.length === 0) return toast.error("Cadastre o cronograma primeiro");
-    // remove previsões anteriores ainda sem NF e sem recebimento
-    const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento").eq("obra_id", obraId);
-    const apagar = (receb ?? []).filter((r) => !r.nota_fiscal_id && !r.data_recebimento).map((r) => r.id);
+    // remove previsões anteriores ainda sem NF e sem recebimento e não congeladas
+    const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento, congelado").eq("obra_id", obraId);
+    const apagar = (receb ?? []).filter((r: any) => !r.nota_fiscal_id && !r.data_recebimento && !r.congelado).map((r: any) => r.id);
     if (apagar.length) await supabase.from("recebimentos").delete().in("id", apagar);
 
     const prazoNF = Number(obra.prazo_emitir_nf_dias || 0);
-    const linhas = itens.map((i) => {
-      const valor = (Number(i.percentual_previsto) / 100) * valorContrato;
-      const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
-      const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
-      return {
+    const pctAntec = Number(obra.percentual_antecipacao || 0);
+    const linhas: any[] = [];
+
+    // Antecipação (se houver) — recebida no início da obra
+    if (pctAntec > 0 && obra.data_inicio) {
+      const valorAntec = (pctAntec / 100) * valorContrato;
+      const venc = calcularVencimento(parseISO(obra.data_inicio), Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+      linhas.push({
         obra_id: obraId,
         data_prevista: venc.toISOString().slice(0, 10),
+        valor_previsto: valorAntec,
+        valor_previsto_inicial: valorAntec,
+        status: "previsto",
+        origem: "antecipacao",
+        observacoes: `Antecipação ${pctAntec.toFixed(2)}%`,
+      });
+    }
+
+    // valor a distribuir nas janelas = contrato - antecipação
+    const baseDist = valorContrato * (1 - pctAntec / 100);
+    for (const i of itens) {
+      const valor = (Number(i.percentual_previsto) / 100) * baseDist;
+      const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
+      const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+      linhas.push({
+        obra_id: obraId,
+        cronograma_item_id: i.id,
+        data_prevista: venc.toISOString().slice(0, 10),
         valor_previsto: valor,
-        status: "previsto" as const,
+        valor_previsto_inicial: valor,
+        status: "previsto",
+        origem: "cronograma",
         observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${Number(i.percentual_previsto).toFixed(2)}%`,
-      };
-    });
+      });
+    }
     const { error } = await supabase.from("recebimentos").insert(linhas);
     if (error) return toast.error(error.message);
     toast.success(`${linhas.length} parcelas previstas geradas`);
     onChange();
   }
+
 
   return (
     <Card>

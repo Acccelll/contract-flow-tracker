@@ -73,8 +73,9 @@ function Importar() {
     if (!file) return;
     setDone(null);
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
+        const XLSX = await import("xlsx");
         const wb = XLSX.read(ev.target?.result, { type: "binary", cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const json: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
@@ -84,8 +85,8 @@ function Importar() {
             nome: String(pick(r, ["obra", "nome"]) ?? "").trim(),
             cliente: String(pick(r, ["cliente"]) ?? "").trim(),
             valor_contrato: num(pick(r, ["valor contrato", "valor do contrato", "contrato", "valor"])),
-            data_inicio: dateStr(pick(r, ["início", "inicio", "data inicio"])),
-            data_fim: dateStr(pick(r, ["fim", "término", "termino", "data fim"])),
+            data_inicio: dateStr(pick(r, ["início", "inicio", "data inicio"]), XLSX),
+            data_fim: dateStr(pick(r, ["fim", "término", "termino", "data fim"]), XLSX),
             local: String(pick(r, ["local", "endereço", "endereco"]) ?? "").trim() || undefined,
             pedido_contrato: String(pick(r, ["pedido", "contrato nº", "contrato n"]) ?? "").trim() || undefined,
             percentual_antecipacao: num(pick(r, ["antecipa"])),

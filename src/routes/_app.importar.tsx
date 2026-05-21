@@ -272,6 +272,7 @@ type MppTask = {
   isMilestone: boolean;
   parentUid?: string;
   hasChildren: boolean;
+  custo: number;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
@@ -287,6 +288,10 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
     const get = (tag: string) => t.querySelector(`:scope > ${tag}`)?.textContent?.trim();
     const start = get("Start");
     const finish = get("Finish");
+    // Cost no XML do MS Project vem em centavos (ex.: 875500000 → R$ 8.755.000,00)
+    const rawCost = Number(get("Cost") ?? "0");
+    const fixedCost = Number(get("FixedCost") ?? "0");
+    const custo = (rawCost || fixedCost) / 100;
     return {
       uid: get("UID") ?? "",
       name: get("Name") ?? "(sem nome)",
@@ -297,8 +302,10 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isSummary: get("Summary") === "1",
       isMilestone: get("Milestone") === "1",
       hasChildren: false,
+      custo: isFinite(custo) ? custo : 0,
     };
   }).filter((t) => t.outlineLevel > 0 && t.name);
+
 
   // parentUid via stack pela ordem do XML
   const stack: MppTask[] = [];

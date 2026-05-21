@@ -264,6 +264,7 @@ function Importar() {
 type MppTask = {
   uid: string;
   name: string;
+  wbs: string;
   outlineLevel: number;
   start?: string;
   finish?: string;
@@ -289,6 +290,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
     return {
       uid: get("UID") ?? "",
       name: get("Name") ?? "(sem nome)",
+      wbs: get("OutlineNumber") ?? "",
       outlineLevel: Number(get("OutlineLevel") ?? "0"),
       start: start ? start.slice(0, 10) : undefined,
       finish: finish ? finish.slice(0, 10) : undefined,
@@ -296,16 +298,15 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isMilestone: get("Milestone") === "1",
       hasChildren: false,
     };
-  }).filter((t) => t.outlineLevel > 0 && t.name && !t.isMilestone);
+  }).filter((t) => t.outlineLevel > 0 && t.name);
 
-  // calcula parentUid via stack pela ordem do XML
+  // parentUid via stack pela ordem do XML
   const stack: MppTask[] = [];
   for (const t of raw) {
     while (stack.length && stack[stack.length - 1].outlineLevel >= t.outlineLevel) stack.pop();
     t.parentUid = stack[stack.length - 1]?.uid;
     stack.push(t);
   }
-  // marca hasChildren
   const childCount = new Map<string, number>();
   for (const t of raw) if (t.parentUid) childCount.set(t.parentUid, (childCount.get(t.parentUid) ?? 0) + 1);
   for (const t of raw) t.hasChildren = (childCount.get(t.uid) ?? 0) > 0;
@@ -318,6 +319,7 @@ function CronogramaImporter() {
   const [titulo, setTitulo] = useState<string>("");
   const [obraId, setObraId] = useState<string>("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [substituir, setSubstituir] = useState<boolean>(true);
   const [done, setDone] = useState<number | null>(null);
@@ -326,6 +328,27 @@ function CronogramaImporter() {
     queryKey: ["obras-lista"],
     queryFn: async () => (await supabase.from("obras").select("id, codigo, nome").order("codigo")).data ?? [],
   });
+
+  // index helpers
+  const byUid = new Map(tasks.map((t) => [t.uid, t]));
+  const childrenOf = new Map<string, MppTask[]>();
+  for (const t of tasks) {
+    if (!t.parentUid) continue;
+    const arr = childrenOf.get(t.parentUid) ?? [];
+    arr.push(t);
+    childrenOf.set(t.parentUid, arr);
+  }
+
+  function descendants(uid: string): MppTask[] {
+    const out: MppTask[] = [];
+    const stack = [...(childrenOf.get(uid) ?? [])];
+    while (stack.length) {
+      const x = stack.pop()!;
+      out.push(x);
+      for (const c of childrenOf.get(x.uid) ?? []) stack.push(c);
+    }
+    return out;
+  }
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -338,10 +361,11 @@ function CronogramaImporter() {
         const { titulo, tasks } = parseMppXml(text);
         setTitulo(titulo ?? "");
         setTasks(tasks);
-        // pré-seleciona as folhas (tarefas sem filhos) — soma natural ≈ 100%
+        // pré-seleciona folhas (incluindo marcos de 0 dias — preserva ART etc.)
         const initSel: Record<string, boolean> = {};
         tasks.forEach((t) => { if (!t.hasChildren) initSel[t.uid] = true; });
         setSelected(initSel);
+        setCollapsed(new Set());
         toast.success(`${tasks.length} tarefas detectadas`);
       } catch (err: any) {
         toast.error(`Erro ao ler XML: ${err.message}`);
@@ -353,9 +377,7 @@ function CronogramaImporter() {
   const escolhidas = tasks.filter((t) => selected[t.uid] && t.start && t.finish);
   const totalDias = escolhidas.reduce((acc, t) => acc + dias(t.start!, t.finish!), 0) || 1;
 
-  // detecta sobreposição pai/filho selecionados
   const selSet = new Set(escolhidas.map((t) => t.uid));
-  const byUid = new Map(tasks.map((t) => [t.uid, t]));
   let sobreposicoes = 0;
   for (const t of escolhidas) {
     let p = t.parentUid;
@@ -373,6 +395,41 @@ function CronogramaImporter() {
     setSelected(next);
   }
 
+  function toggleSelect(t: MppTask, value: boolean) {
+    setSelected((s) => {
+      const next = { ...s, [t.uid]: value };
+      // propaga para descendentes
+      if (t.hasChildren) {
+        for (const d of descendants(t.uid)) next[d.uid] = value;
+      }
+      return next;
+    });
+  }
+
+  function toggleCollapse(uid: string) {
+    setCollapsed((s) => {
+      const n = new Set(s);
+      if (n.has(uid)) n.delete(uid); else n.add(uid);
+      return n;
+    });
+  }
+
+  // visíveis: oculta descendentes de nós colapsados
+  const visibleTasks: MppTask[] = [];
+  {
+    const hiddenAncestors = new Set<string>();
+    for (const t of tasks) {
+      let hidden = false;
+      let p = t.parentUid;
+      while (p) {
+        if (collapsed.has(p) || hiddenAncestors.has(p)) { hidden = true; break; }
+        p = byUid.get(p)?.parentUid;
+      }
+      if (!hidden) visibleTasks.push(t);
+      else hiddenAncestors.add(t.uid);
+    }
+  }
+
   async function importar() {
     if (!obraId) return toast.error("Selecione a obra de destino");
     if (escolhidas.length === 0) return toast.error("Nenhuma tarefa selecionada com datas válidas");
@@ -383,10 +440,10 @@ function CronogramaImporter() {
         if (delErr) throw delErr;
       }
       const rows = escolhidas.map((t, i) => {
-        const prefix = t.outlineLevel > 1 ? "— ".repeat(t.outlineLevel - 1) : "";
+        const wbs = t.wbs ? `${t.wbs} ` : "";
         return {
           obra_id: obraId,
-          descricao: prefix + t.name,
+          descricao: wbs + t.name,
           data_inicio: t.start!,
           data_fim: t.finish!,
           ordem: i,
@@ -434,7 +491,7 @@ function CronogramaImporter() {
             Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
           </label>
           <p className="text-xs text-muted-foreground">
-            Marque qualquer combinação de tarefas — fases, pacotes, ou ambos. O % previsto de cada item é proporcional à sua duração dentro da seleção. A seleção padrão é "Folhas" (tarefas sem subdivisão), que soma naturalmente ≈ 100%.
+            A árvore espelha a EDT do MS Project. Marcos (0 dias, ex.: ART) são preservados com 0% previsto. Use as setas (▾/▸) para recolher fases. O % previsto de cada item é proporcional à sua duração dentro da seleção.
           </p>
         </CardContent>
       </Card>
@@ -455,6 +512,7 @@ function CronogramaImporter() {
             </div>
             <div className="flex gap-2 flex-wrap">
               <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren)}>Folhas</Button>
+              <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren && !!t.start && !!t.finish && dias(t.start, t.finish) > 0)}>Folhas c/ duração</Button>
               {niveisPresentes.map((n) => (
                 <Button key={n} variant="outline" size="sm" onClick={() => setAll((t) => t.outlineLevel === n)}>
                   Nível {n}
@@ -462,6 +520,8 @@ function CronogramaImporter() {
               ))}
               <Button variant="outline" size="sm" onClick={() => setAll(() => true)}>Tudo</Button>
               <Button variant="outline" size="sm" onClick={() => setSelected({})}>Limpar</Button>
+              <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set(tasks.filter((t) => t.hasChildren).map((t) => t.uid)))}>Recolher tudo</Button>
+              <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set())}>Expandir tudo</Button>
               <Button onClick={importar} disabled={importing || !obraId}>
                 <Upload className="h-4 w-4 mr-2" />{importing ? "Importando…" : "Importar cronograma"}
               </Button>
@@ -471,35 +531,52 @@ function CronogramaImporter() {
             <Table>
               <TableHeader><TableRow>
                 <TableHead className="w-8"></TableHead>
+                <TableHead className="w-20">EDT</TableHead>
                 <TableHead>Tarefa</TableHead>
-                <TableHead className="w-16 text-right">Nível</TableHead>
                 <TableHead>Início</TableHead>
                 <TableHead>Fim</TableHead>
                 <TableHead className="text-right">Dias</TableHead>
                 <TableHead className="text-right">% previsto</TableHead>
               </TableRow></TableHeader>
               <TableBody>
-                {tasks.map((t) => {
+                {visibleTasks.map((t) => {
                   const d = t.start && t.finish ? dias(t.start, t.finish) : 0;
                   const pct = selected[t.uid] && d > 0 ? (d / totalDias) * 100 : 0;
                   const isSummary = t.hasChildren || t.isSummary;
+                  const isCollapsed = collapsed.has(t.uid);
                   return (
-                    <TableRow key={t.uid} className={isSummary ? "text-muted-foreground" : ""}>
+                    <TableRow key={t.uid} className={isSummary ? "bg-muted/40" : ""}>
                       <TableCell>
                         <Checkbox
                           checked={!!selected[t.uid]}
-                          onCheckedChange={(v) => setSelected((s) => ({ ...s, [t.uid]: !!v }))}
+                          onCheckedChange={(v) => toggleSelect(t, !!v)}
                         />
                       </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{t.wbs}</TableCell>
                       <TableCell>
-                        <span style={{ paddingLeft: `${(t.outlineLevel - 1) * 16}px` }} className={isSummary ? "italic font-medium" : ""}>
-                          {isSummary ? "▸ " : ""}{t.name}
-                        </span>
+                        <div className="flex items-center" style={{ paddingLeft: `${(t.outlineLevel - 1) * 18}px` }}>
+                          {t.hasChildren ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleCollapse(t.uid)}
+                              className="mr-1 inline-flex h-4 w-4 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                              aria-label={isCollapsed ? "Expandir" : "Recolher"}
+                            >
+                              {isCollapsed ? "▸" : "▾"}
+                            </button>
+                          ) : (
+                            <span className="mr-1 inline-block w-4 text-center text-xs text-muted-foreground">
+                              {t.isMilestone ? "◆" : "·"}
+                            </span>
+                          )}
+                          <span className={isSummary ? "font-semibold" : t.isMilestone ? "text-muted-foreground" : ""}>
+                            {t.name}
+                          </span>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs">{t.outlineLevel}</TableCell>
-                      <TableCell>{t.start ?? "—"}</TableCell>
-                      <TableCell>{t.finish ?? "—"}</TableCell>
-                      <TableCell className="text-right">{d || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{t.start ?? "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{t.finish ?? "—"}</TableCell>
+                      <TableCell className="text-right">{d || (t.isMilestone ? "0" : "—")}</TableCell>
                       <TableCell className="text-right">{pct ? pct.toFixed(1) + "%" : "—"}</TableCell>
                     </TableRow>
                   );
@@ -524,6 +601,7 @@ function CronogramaImporter() {
 function dias(start: string, end: string): number {
   const a = new Date(start).getTime();
   const b = new Date(end).getTime();
-  return Math.max(1, Math.round((b - a) / (1000 * 60 * 60 * 24)));
+  return Math.max(0, Math.round((b - a) / (1000 * 60 * 60 * 24)));
 }
+
 

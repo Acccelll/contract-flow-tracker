@@ -268,42 +268,54 @@ export type Database = {
       }
       recebimentos: {
         Row: {
+          congelado: boolean
           created_at: string
+          cronograma_item_id: string | null
           data_prevista: string
           data_recebimento: string | null
           id: string
           nota_fiscal_id: string | null
           obra_id: string
           observacoes: string | null
+          origem: string
           status: Database["public"]["Enums"]["recebimento_status"]
           updated_at: string
           valor_previsto: number
+          valor_previsto_inicial: number | null
           valor_recebido: number | null
         }
         Insert: {
+          congelado?: boolean
           created_at?: string
+          cronograma_item_id?: string | null
           data_prevista: string
           data_recebimento?: string | null
           id?: string
           nota_fiscal_id?: string | null
           obra_id: string
           observacoes?: string | null
+          origem?: string
           status?: Database["public"]["Enums"]["recebimento_status"]
           updated_at?: string
           valor_previsto?: number
+          valor_previsto_inicial?: number | null
           valor_recebido?: number | null
         }
         Update: {
+          congelado?: boolean
           created_at?: string
+          cronograma_item_id?: string | null
           data_prevista?: string
           data_recebimento?: string | null
           id?: string
           nota_fiscal_id?: string | null
           obra_id?: string
           observacoes?: string | null
+          origem?: string
           status?: Database["public"]["Enums"]["recebimento_status"]
           updated_at?: string
           valor_previsto?: number
+          valor_previsto_inicial?: number | null
           valor_recebido?: number | null
         }
         Relationships: [

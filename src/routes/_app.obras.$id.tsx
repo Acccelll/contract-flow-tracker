@@ -322,8 +322,12 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       nota_fiscal_id: nf.id,
       data_prevista: venc.toISOString().slice(0, 10),
       valor_previsto: valor,
+      valor_previsto_inicial: valor,
       status: "a_receber",
+      origem: "nf",
+      congelado: true,
     });
+
     // recalcular previsão: redistribuir saldo entre parcelas futuras sem NF
     await recalcularPrevisaoNF(obra.id, Number(obra.valor_contrato));
     toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")} · previsão recalculada`);

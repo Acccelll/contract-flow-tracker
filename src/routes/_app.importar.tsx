@@ -269,6 +269,8 @@ type MppTask = {
   finish?: string;
   isSummary: boolean;
   isMilestone: boolean;
+  parentUid?: string;
+  hasChildren: boolean;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
@@ -280,7 +282,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
     || doc.querySelector("Project > Name")?.textContent?.trim();
 
   const taskNodes = Array.from(doc.querySelectorAll("Project > Tasks > Task"));
-  const tasks: MppTask[] = taskNodes.map((t) => {
+  const raw: MppTask[] = taskNodes.map((t) => {
     const get = (tag: string) => t.querySelector(`:scope > ${tag}`)?.textContent?.trim();
     const start = get("Start");
     const finish = get("Finish");
@@ -292,15 +294,28 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       finish: finish ? finish.slice(0, 10) : undefined,
       isSummary: get("Summary") === "1",
       isMilestone: get("Milestone") === "1",
+      hasChildren: false,
     };
-  });
-  return { titulo, tasks: tasks.filter((t) => t.outlineLevel > 0 && t.name && !t.isSummary) };
+  }).filter((t) => t.outlineLevel > 0 && t.name && !t.isMilestone);
+
+  // calcula parentUid via stack pela ordem do XML
+  const stack: MppTask[] = [];
+  for (const t of raw) {
+    while (stack.length && stack[stack.length - 1].outlineLevel >= t.outlineLevel) stack.pop();
+    t.parentUid = stack[stack.length - 1]?.uid;
+    stack.push(t);
+  }
+  // marca hasChildren
+  const childCount = new Map<string, number>();
+  for (const t of raw) if (t.parentUid) childCount.set(t.parentUid, (childCount.get(t.parentUid) ?? 0) + 1);
+  for (const t of raw) t.hasChildren = (childCount.get(t.uid) ?? 0) > 0;
+
+  return { titulo, tasks: raw };
 }
 
 function CronogramaImporter() {
   const [tasks, setTasks] = useState<MppTask[]>([]);
   const [titulo, setTitulo] = useState<string>("");
-  const [level, setLevel] = useState<number>(1);
   const [obraId, setObraId] = useState<string>("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [importing, setImporting] = useState(false);
@@ -323,9 +338,9 @@ function CronogramaImporter() {
         const { titulo, tasks } = parseMppXml(text);
         setTitulo(titulo ?? "");
         setTasks(tasks);
-        // pré-seleciona o nível 1 (fases principais)
+        // pré-seleciona as folhas (tarefas sem filhos) — soma natural ≈ 100%
         const initSel: Record<string, boolean> = {};
-        tasks.forEach((t) => { if (t.outlineLevel === 1 && !t.isMilestone) initSel[t.uid] = true; });
+        tasks.forEach((t) => { if (!t.hasChildren) initSel[t.uid] = true; });
         setSelected(initSel);
         toast.success(`${tasks.length} tarefas detectadas`);
       } catch (err: any) {
@@ -335,16 +350,26 @@ function CronogramaImporter() {
     reader.readAsText(file);
   }
 
-  // tarefas filtradas pelo nível escolhido
-  const filtradas = tasks.filter((t) => t.outlineLevel === level && !t.isMilestone);
-  const escolhidas = filtradas.filter((t) => selected[t.uid] && t.start && t.finish);
-
-  // % proporcional à duração
+  const escolhidas = tasks.filter((t) => selected[t.uid] && t.start && t.finish);
   const totalDias = escolhidas.reduce((acc, t) => acc + dias(t.start!, t.finish!), 0) || 1;
 
-  function toggleAll(v: boolean) {
-    const next: Record<string, boolean> = { ...selected };
-    filtradas.forEach((t) => { next[t.uid] = v; });
+  // detecta sobreposição pai/filho selecionados
+  const selSet = new Set(escolhidas.map((t) => t.uid));
+  const byUid = new Map(tasks.map((t) => [t.uid, t]));
+  let sobreposicoes = 0;
+  for (const t of escolhidas) {
+    let p = t.parentUid;
+    while (p) {
+      if (selSet.has(p)) { sobreposicoes++; break; }
+      p = byUid.get(p)?.parentUid;
+    }
+  }
+
+  const niveisPresentes = Array.from(new Set(tasks.map((t) => t.outlineLevel))).sort((a, b) => a - b);
+
+  function setAll(predicate: (t: MppTask) => boolean) {
+    const next: Record<string, boolean> = {};
+    tasks.forEach((t) => { if (predicate(t)) next[t.uid] = true; });
     setSelected(next);
   }
 
@@ -357,14 +382,17 @@ function CronogramaImporter() {
         const { error: delErr } = await supabase.from("cronograma_itens").delete().eq("obra_id", obraId);
         if (delErr) throw delErr;
       }
-      const rows = escolhidas.map((t, i) => ({
-        obra_id: obraId,
-        descricao: t.name,
-        data_inicio: t.start!,
-        data_fim: t.finish!,
-        ordem: i,
-        percentual_previsto: Number(((dias(t.start!, t.finish!) / totalDias) * 100).toFixed(2)),
-      }));
+      const rows = escolhidas.map((t, i) => {
+        const prefix = t.outlineLevel > 1 ? "— ".repeat(t.outlineLevel - 1) : "";
+        return {
+          obra_id: obraId,
+          descricao: prefix + t.name,
+          data_inicio: t.start!,
+          data_fim: t.finish!,
+          ordem: i,
+          percentual_previsto: Number(((dias(t.start!, t.finish!) / totalDias) * 100).toFixed(2)),
+        };
+      });
       const { error } = await supabase.from("cronograma_itens").insert(rows);
       if (error) throw error;
       setDone(rows.length);
@@ -383,7 +411,7 @@ function CronogramaImporter() {
           <CardTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Cronograma (XML do MS Project)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Arquivo .xml</Label>
               <Input type="file" accept=".xml" onChange={onFile} />
@@ -399,37 +427,41 @@ function CronogramaImporter() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>Nível de detalhe (Outline)</Label>
-              <Select value={String(level)} onValueChange={(v) => setLevel(Number(v))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4, 5].map((n) => <SelectItem key={n} value={String(n)}>Nível {n}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
-          {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas no XML · {filtradas.length} no nível {level}</p>}
+          {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas · níveis {niveisPresentes.join(", ")}</p>}
           <label className="flex items-center gap-2 text-sm">
             <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
             Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
           </label>
           <p className="text-xs text-muted-foreground">
-            % previsto de cada item é calculado proporcionalmente à duração e pode ser ajustado depois no detalhe da obra. Tarefas-resumo (Summary) são ignoradas para não somar com suas subtarefas.
+            Marque qualquer combinação de tarefas — fases, pacotes, ou ambos. O % previsto de cada item é proporcional à sua duração dentro da seleção. A seleção padrão é "Folhas" (tarefas sem subdivisão), que soma naturalmente ≈ 100%.
           </p>
         </CardContent>
       </Card>
 
-      {filtradas.length > 0 && (
+      {tasks.length > 0 && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
             <div>
-              <CardTitle>Tarefas do nível {level} ({filtradas.length})</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">{escolhidas.length} selecionadas · soma {totalDias} dias</p>
+              <CardTitle>Tarefas do cronograma ({tasks.length})</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {escolhidas.length} selecionadas · soma {totalDias} dias
+                {sobreposicoes > 0 && (
+                  <span className="ml-2 inline-flex items-center rounded bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 text-[11px]">
+                    ⚠ {sobreposicoes} sobreposição{sobreposicoes > 1 ? "ões" : ""} pai/filho — a soma passará de 100%
+                  </span>
+                )}
+              </p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => toggleAll(true)}>Selecionar tudo</Button>
-              <Button variant="outline" size="sm" onClick={() => toggleAll(false)}>Limpar</Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren)}>Folhas</Button>
+              {niveisPresentes.map((n) => (
+                <Button key={n} variant="outline" size="sm" onClick={() => setAll((t) => t.outlineLevel === n)}>
+                  Nível {n}
+                </Button>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setAll(() => true)}>Tudo</Button>
+              <Button variant="outline" size="sm" onClick={() => setSelected({})}>Limpar</Button>
               <Button onClick={importar} disabled={importing || !obraId}>
                 <Upload className="h-4 w-4 mr-2" />{importing ? "Importando…" : "Importar cronograma"}
               </Button>
@@ -440,24 +472,31 @@ function CronogramaImporter() {
               <TableHeader><TableRow>
                 <TableHead className="w-8"></TableHead>
                 <TableHead>Tarefa</TableHead>
+                <TableHead className="w-16 text-right">Nível</TableHead>
                 <TableHead>Início</TableHead>
                 <TableHead>Fim</TableHead>
                 <TableHead className="text-right">Dias</TableHead>
                 <TableHead className="text-right">% previsto</TableHead>
               </TableRow></TableHeader>
               <TableBody>
-                {filtradas.map((t) => {
+                {tasks.map((t) => {
                   const d = t.start && t.finish ? dias(t.start, t.finish) : 0;
                   const pct = selected[t.uid] && d > 0 ? (d / totalDias) * 100 : 0;
+                  const isSummary = t.hasChildren || t.isSummary;
                   return (
-                    <TableRow key={t.uid}>
+                    <TableRow key={t.uid} className={isSummary ? "text-muted-foreground" : ""}>
                       <TableCell>
                         <Checkbox
                           checked={!!selected[t.uid]}
                           onCheckedChange={(v) => setSelected((s) => ({ ...s, [t.uid]: !!v }))}
                         />
                       </TableCell>
-                      <TableCell>{t.name}</TableCell>
+                      <TableCell>
+                        <span style={{ paddingLeft: `${(t.outlineLevel - 1) * 16}px` }} className={isSummary ? "italic font-medium" : ""}>
+                          {isSummary ? "▸ " : ""}{t.name}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">{t.outlineLevel}</TableCell>
                       <TableCell>{t.start ?? "—"}</TableCell>
                       <TableCell>{t.finish ?? "—"}</TableCell>
                       <TableCell className="text-right">{d || "—"}</TableCell>

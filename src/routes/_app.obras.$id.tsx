@@ -214,7 +214,10 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
       </CardHeader>
       <CardContent>
         <CronogramaHierarquia itens={itens} valorContrato={valorContrato} onRemove={remove} />
-        {total > 0 && Math.abs(total - 100) > 0.01 && (
+        {somaCusto > 0 && Math.abs(totalDiffReais) > 0.01 && (
+          <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {brl(somaCusto)} ({total.toFixed(2)}%) — diferença de {brl(totalDiffReais)} em relação ao contrato.</p>
+        )}
+        {somaCusto === 0 && total > 0 && Math.abs(total - 100) > 0.01 && (
           <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {total.toFixed(2)}% (ideal 100%).</p>
         )}
       </CardContent>

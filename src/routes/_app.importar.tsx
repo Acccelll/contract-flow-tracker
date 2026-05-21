@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { brl } from "@/lib/billing";
 import { Upload, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 
-export const Route = createFileRoute("/_app/importar")({ component: Importar });
+export const Route = createFileRoute("/_app/importar")({
+  component: Importar,
+  ssr: false,
+});
 
 type Row = {
   codigo: string;

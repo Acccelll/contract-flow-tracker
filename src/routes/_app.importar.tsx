@@ -335,8 +335,11 @@ function CronogramaImporter() {
 
   const { data: obras } = useQuery({
     queryKey: ["obras-lista"],
-    queryFn: async () => (await supabase.from("obras").select("id, codigo, nome").order("codigo")).data ?? [],
+    queryFn: async () => (await supabase.from("obras").select("id, codigo, nome, valor_contrato").order("codigo")).data ?? [],
   });
+  const obraSelecionada = obras?.find((o) => o.id === obraId);
+  const valorContrato = Number(obraSelecionada?.valor_contrato ?? 0);
+
 
   // index helpers
   const byUid = new Map(tasks.map((t) => [t.uid, t]));

@@ -385,6 +385,16 @@ function CronogramaImporter() {
 
   const escolhidas = tasks.filter((t) => selected[t.uid] && t.start && t.finish);
   const totalDias = escolhidas.reduce((acc, t) => acc + dias(t.start!, t.finish!), 0) || 1;
+  const totalCusto = escolhidas.reduce((acc, t) => acc + (t.custo || 0), 0);
+  // se a opção for "custo" mas a seleção não tiver nenhum valor, cai para "dias"
+  const modoEfetivo: "custo" | "dias" = ponderacao === "custo" && totalCusto > 0 ? "custo" : "dias";
+
+  function pctOf(t: MppTask): number {
+    if (!t.start || !t.finish) return 0;
+    if (modoEfetivo === "custo") return totalCusto > 0 ? ((t.custo || 0) / totalCusto) * 100 : 0;
+    return (dias(t.start, t.finish) / totalDias) * 100;
+  }
+
 
   const selSet = new Set(escolhidas.map((t) => t.uid));
   let sobreposicoes = 0;

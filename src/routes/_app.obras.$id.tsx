@@ -311,29 +311,33 @@ function buildTree(itens: any[]): CronoNode[] {
   return roots;
 }
 
-function aggregate(n: CronoNode): { pct: number; inicio?: string; fim?: string } {
+function aggregate(n: CronoNode): { custo: number; pct: number; inicio?: string; fim?: string } {
   if (n.item && n.children.length === 0) {
     return {
+      custo: Number(n.item.custo || 0),
       pct: Number(n.item.percentual_previsto || 0),
       inicio: n.item.data_inicio,
       fim: n.item.data_fim,
     };
   }
+  let custo = 0;
   let pct = 0;
   let inicio: string | undefined;
   let fim: string | undefined;
   for (const c of n.children) {
     const a = aggregate(c);
+    custo += a.custo;
     pct += a.pct;
     if (a.inicio && (!inicio || a.inicio < inicio)) inicio = a.inicio;
     if (a.fim && (!fim || a.fim > fim)) fim = a.fim;
   }
   if (n.item) {
+    custo += Number(n.item.custo || 0);
     pct += Number(n.item.percentual_previsto || 0);
     if (n.item.data_inicio && (!inicio || n.item.data_inicio < inicio)) inicio = n.item.data_inicio;
     if (n.item.data_fim && (!fim || n.item.data_fim > fim)) fim = n.item.data_fim;
   }
-  return { pct, inicio, fim };
+  return { custo, pct, inicio, fim };
 }
 
 function CronogramaHierarquia({ itens, valorContrato, onRemove }: { itens: any[]; valorContrato: number; onRemove: (id: string) => void }) {

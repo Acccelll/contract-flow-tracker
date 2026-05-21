@@ -189,6 +189,7 @@ function Importar() {
         <TabsList>
           <TabsTrigger value="planilha"><FileSpreadsheet className="h-4 w-4 mr-2" />Planilha de contratos</TabsTrigger>
           <TabsTrigger value="cronograma"><CalendarClock className="h-4 w-4 mr-2" />Cronograma (MS Project XML)</TabsTrigger>
+          <TabsTrigger value="nfse"><FileText className="h-4 w-4 mr-2" />NFS-e (Excel)</TabsTrigger>
         </TabsList>
 
         <TabsContent value="planilha" className="space-y-6 mt-4">
@@ -256,6 +257,10 @@ function Importar() {
 
         <TabsContent value="cronograma" className="mt-4">
           <CronogramaImporter />
+        </TabsContent>
+
+        <TabsContent value="nfse" className="mt-4">
+          <NfseImporter />
         </TabsContent>
       </Tabs>
     </div>

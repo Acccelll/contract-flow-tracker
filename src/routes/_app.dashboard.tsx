@@ -63,6 +63,8 @@ function Dashboard() {
         <Kpi icon={AlertCircle} label="Próximos 30d" value={brl(range(fim30))} hint={`60d: ${brl(range(fim60))} · 90d: ${brl(range(fim90))}`} />
       </div>
 
+      <AlertasCard recebimentos={recebimentos} obras={obras} />
+
       <Card>
         <CardHeader><CardTitle>Obras</CardTitle></CardHeader>
         <CardContent>

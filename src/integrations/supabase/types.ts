@@ -94,6 +94,54 @@ export type Database = {
           },
         ]
       }
+      itens_medicao: {
+        Row: {
+          created_at: string
+          cronograma_item_id: string
+          id: string
+          medicao_id: string
+          percentual_anterior: number
+          percentual_atual: number
+          valor_anterior: number
+          valor_atual: number
+        }
+        Insert: {
+          created_at?: string
+          cronograma_item_id: string
+          id?: string
+          medicao_id: string
+          percentual_anterior?: number
+          percentual_atual?: number
+          valor_anterior?: number
+          valor_atual?: number
+        }
+        Update: {
+          created_at?: string
+          cronograma_item_id?: string
+          id?: string
+          medicao_id?: string
+          percentual_anterior?: number
+          percentual_atual?: number
+          valor_anterior?: number
+          valor_atual?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itens_medicao_cronograma_item_id_fkey"
+            columns: ["cronograma_item_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_itens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "itens_medicao_medicao_id_fkey"
+            columns: ["medicao_id"]
+            isOneToOne: false
+            referencedRelation: "medicoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       medicoes: {
         Row: {
           created_at: string

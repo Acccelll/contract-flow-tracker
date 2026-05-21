@@ -109,7 +109,11 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
   const valorContrato = Number(obra.valor_contrato);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
-  const total = itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
+  const somaCusto = itens.reduce((a, i) => a + Number(i.custo || 0), 0);
+  const total = valorContrato > 0 && somaCusto > 0
+    ? (somaCusto / valorContrato) * 100
+    : itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
+  const totalDiffReais = valorContrato - somaCusto;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();

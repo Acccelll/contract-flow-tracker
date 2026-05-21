@@ -92,7 +92,7 @@ function ObraDetail() {
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="cronograma"><CronogramaTab obraId={id} valorContrato={Number(obra.valor_contrato)} itens={crono ?? []} /></TabsContent>
+        <TabsContent value="cronograma"><CronogramaTab obra={obra} itens={crono ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["crono", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="medicoes"><MedicoesTab obra={obra} medicoes={medicoes ?? []} receb={receb ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["medicoes", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
@@ -101,8 +101,9 @@ function ObraDetail() {
   );
 }
 
-function CronogramaTab({ obraId, valorContrato, itens }: { obraId: string; valorContrato: number; itens: any[] }) {
-  const qc = useQueryClient();
+function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onChange: () => void }) {
+  const obraId = obra.id;
+  const valorContrato = Number(obra.valor_contrato);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
   const total = itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
@@ -120,30 +121,59 @@ function CronogramaTab({ obraId, valorContrato, itens }: { obraId: string; valor
     if (error) return toast.error(error.message);
     toast.success("Janela adicionada");
     setOpen(false); setF({});
-    qc.invalidateQueries({ queryKey: ["crono", obraId] });
+    onChange();
   }
   async function remove(id: string) {
     await supabase.from("cronograma_itens").delete().eq("id", id);
-    qc.invalidateQueries({ queryKey: ["crono", obraId] });
+    onChange();
+  }
+
+  async function gerarPrevisao() {
+    if (itens.length === 0) return toast.error("Cadastre o cronograma primeiro");
+    // remove previsões anteriores ainda sem NF e sem recebimento
+    const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento").eq("obra_id", obraId);
+    const apagar = (receb ?? []).filter((r) => !r.nota_fiscal_id && !r.data_recebimento).map((r) => r.id);
+    if (apagar.length) await supabase.from("recebimentos").delete().in("id", apagar);
+
+    const prazoNF = Number(obra.prazo_emitir_nf_dias || 0);
+    const linhas = itens.map((i) => {
+      const valor = (Number(i.percentual_previsto) / 100) * valorContrato;
+      const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
+      const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+      return {
+        obra_id: obraId,
+        data_prevista: venc.toISOString().slice(0, 10),
+        valor_previsto: valor,
+        status: "previsto" as const,
+        observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${Number(i.percentual_previsto).toFixed(2)}%`,
+      };
+    });
+    const { error } = await supabase.from("recebimentos").insert(linhas);
+    if (error) return toast.error(error.message);
+    toast.success(`${linhas.length} parcelas previstas geradas`);
+    onChange();
   }
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
         <CardTitle>Cronograma · {total.toFixed(2)}% planejado</CardTitle>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-2" />Janela</Button></DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Nova janela do cronograma</DialogTitle></DialogHeader>
-            <form onSubmit={save} className="grid grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1.5"><Label>Descrição</Label><Input value={f.descricao ?? ""} onChange={(e) => setF({ ...f, descricao: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Início</Label><Input type="date" required value={f.data_inicio ?? ""} onChange={(e) => setF({ ...f, data_inicio: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Fim</Label><Input type="date" required value={f.data_fim ?? ""} onChange={(e) => setF({ ...f, data_fim: e.target.value })} /></div>
-              <div className="col-span-2 space-y-1.5"><Label>% previsto no período</Label><Input type="number" step="0.0001" required value={f.percentual_previsto ?? ""} onChange={(e) => setF({ ...f, percentual_previsto: e.target.value })} /></div>
-              <DialogFooter className="col-span-2"><Button type="submit">Adicionar</Button></DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={gerarPrevisao}><FileText className="h-4 w-4 mr-2" />Gerar previsão</Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-2" />Janela</Button></DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Nova janela do cronograma</DialogTitle></DialogHeader>
+              <form onSubmit={save} className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1.5"><Label>Descrição</Label><Input value={f.descricao ?? ""} onChange={(e) => setF({ ...f, descricao: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Início</Label><Input type="date" required value={f.data_inicio ?? ""} onChange={(e) => setF({ ...f, data_inicio: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Fim</Label><Input type="date" required value={f.data_fim ?? ""} onChange={(e) => setF({ ...f, data_fim: e.target.value })} /></div>
+                <div className="col-span-2 space-y-1.5"><Label>% previsto no período</Label><Input type="number" step="0.0001" required value={f.percentual_previsto ?? ""} onChange={(e) => setF({ ...f, percentual_previsto: e.target.value })} /></div>
+                <DialogFooter className="col-span-2"><Button type="submit">Adicionar</Button></DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </CardHeader>
       <CardContent>
         <Table>
@@ -161,10 +191,14 @@ function CronogramaTab({ obraId, valorContrato, itens }: { obraId: string; valor
             {itens.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Cadastre as janelas do cronograma</TableCell></TableRow>}
           </TableBody>
         </Table>
+        {total > 0 && Math.abs(total - 100) > 0.01 && (
+          <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {total.toFixed(2)}% (ideal 100%).</p>
+        )}
       </CardContent>
     </Card>
   );
 }
+
 
 function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes: any[]; receb: any[]; onChange: () => void }) {
   const [open, setOpen] = useState(false);
@@ -190,11 +224,10 @@ function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes:
     const dataAprov = new Date().toISOString().slice(0, 10);
     const { error } = await supabase.from("medicoes").update({ status: "aprovada", data_aprovacao: dataAprov }).eq("id", m.id);
     if (error) return toast.error(error.message);
-    // recalcular previsão dinâmica: redistribuir saldo
-    await recalcularPrevisao(obra, medicoes.map((x) => x.id === m.id ? { ...x, status: "aprovada", data_aprovacao: dataAprov } : x), receb);
-    toast.success("Medição aprovada e previsão recalculada");
+    toast.success("Medição aprovada");
     onChange();
   }
+
 
   return (
     <Card>
@@ -246,27 +279,31 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
     e.preventDefault();
     const dataEmissao = f.data_emissao ? parseISO(f.data_emissao) : new Date();
     const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+    const valor = Number(f.valor || 0);
     const { data: nf, error } = await supabase.from("notas_fiscais").insert({
       obra_id: obra.id,
       medicao_id: f.medicao_id || null,
       numero: f.numero || null,
       data_emissao: f.data_emissao || null,
-      valor: Number(f.valor || 0),
+      valor,
       data_vencimento: venc.toISOString().slice(0, 10),
     }).select().single();
     if (error || !nf) return toast.error(error?.message ?? "Erro");
-    // criar recebimento previsto
+    // criar recebimento previsto vinculado à NF
     await supabase.from("recebimentos").insert({
       obra_id: obra.id,
       nota_fiscal_id: nf.id,
       data_prevista: venc.toISOString().slice(0, 10),
-      valor_previsto: Number(f.valor || 0),
+      valor_previsto: valor,
       status: "a_receber",
     });
-    toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")}`);
+    // recalcular previsão: redistribuir saldo entre parcelas futuras sem NF
+    await recalcularPrevisaoNF(obra.id, Number(obra.valor_contrato));
+    toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")} · previsão recalculada`);
     setOpen(false); setF({});
     onChange();
   }
+
 
   return (
     <Card>
@@ -367,19 +404,29 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="secondary" className={m[status] ?? ""}>{status}</Badge>;
 }
 
-// Redistribui o saldo previsto entre as parcelas a receber futuras
-async function recalcularPrevisao(obra: any, medicoes: any[], receb: any[]) {
-  const valorContrato = Number(obra.valor_contrato);
-  // soma de medições aprovadas (já realizado)
-  const realizado = medicoes.filter((m) => m.status === "aprovada").reduce((a, m) => a + Number(m.valor), 0);
-  // parcelas futuras (sem recebimento ainda e sem NF vinculada)
-  const futuras = receb.filter((r) => !r.data_recebimento && !r.nota_fiscal_id);
+// Recalcula previsões futuras após emissão de NF.
+// Saldo = valor do contrato - soma das NFs emitidas. Esse saldo é redistribuído
+// proporcionalmente entre as parcelas previstas que ainda não têm NF vinculada
+// nem recebimento confirmado.
+async function recalcularPrevisaoNF(obraId: string, valorContrato: number) {
+  const [{ data: nfs }, { data: receb }] = await Promise.all([
+    supabase.from("notas_fiscais").select("valor").eq("obra_id", obraId),
+    supabase.from("recebimentos").select("*").eq("obra_id", obraId),
+  ]);
+  const faturado = (nfs ?? []).reduce((a, n) => a + Number(n.valor || 0), 0);
+  const futuras = (receb ?? []).filter((r) => !r.data_recebimento && !r.nota_fiscal_id);
   const totalFuturo = futuras.reduce((a, r) => a + Number(r.valor_previsto), 0);
-  const saldo = Math.max(0, valorContrato - realizado);
-  if (futuras.length === 0 || totalFuturo === 0) return;
-  for (const r of futuras) {
-    const prop = Number(r.valor_previsto) / totalFuturo;
-    const novo = saldo * prop;
-    await supabase.from("recebimentos").update({ valor_previsto: novo }).eq("id", r.id);
+  const saldo = Math.max(0, valorContrato - faturado);
+  if (futuras.length === 0) return;
+  if (totalFuturo === 0) {
+    // distribuir saldo igualmente
+    const v = saldo / futuras.length;
+    await Promise.all(futuras.map((r) => supabase.from("recebimentos").update({ valor_previsto: v }).eq("id", r.id)));
+    return;
   }
+  await Promise.all(futuras.map((r) => {
+    const prop = Number(r.valor_previsto) / totalFuturo;
+    return supabase.from("recebimentos").update({ valor_previsto: saldo * prop }).eq("id", r.id);
+  }));
 }
+

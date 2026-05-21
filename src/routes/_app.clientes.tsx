@@ -25,8 +25,9 @@ function ClientesPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const { data: u } = await supabase.auth.getUser();
+    if (!u.user) return toast.error("Sessão expirada");
     const { error } = await supabase.from("clientes").insert({
-      owner_id: u.user?.id,
+      owner_id: u.user.id,
       nome: f.nome,
       cnpj: f.cnpj || null,
       prazo_pagamento_dias: f.prazo_pagamento_dias ? Number(f.prazo_pagamento_dias) : null,

@@ -33,8 +33,9 @@ function ObrasPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const { data: u } = await supabase.auth.getUser();
+    if (!u.user) return toast.error("Sessão expirada");
     const payload = {
-      owner_id: u.user?.id,
+      owner_id: u.user.id,
       cliente_id: form.cliente_id || null,
       codigo: form.codigo,
       nome: form.nome,

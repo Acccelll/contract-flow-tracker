@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppObrasRouteImport } from './routes/_app.obras'
+import { Route as AppImportarRouteImport } from './routes/_app.importar'
 import { Route as AppFluxoRouteImport } from './routes/_app.fluxo'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppClientesRouteImport } from './routes/_app.clientes'
@@ -35,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppObrasRoute = AppObrasRouteImport.update({
   id: '/obras',
   path: '/obras',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImportarRoute = AppImportarRouteImport.update({
+  id: '/importar',
+  path: '/importar',
   getParentRoute: () => AppRoute,
 } as any)
 const AppFluxoRoute = AppFluxoRouteImport.update({
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/clientes': typeof AppClientesRoute
   '/dashboard': typeof AppDashboardRoute
   '/fluxo': typeof AppFluxoRoute
+  '/importar': typeof AppImportarRoute
   '/obras': typeof AppObrasRouteWithChildren
   '/obras/$id': typeof AppObrasIdRoute
 }
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/clientes': typeof AppClientesRoute
   '/dashboard': typeof AppDashboardRoute
   '/fluxo': typeof AppFluxoRoute
+  '/importar': typeof AppImportarRoute
   '/obras': typeof AppObrasRouteWithChildren
   '/obras/$id': typeof AppObrasIdRoute
 }
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/_app/clientes': typeof AppClientesRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/fluxo': typeof AppFluxoRoute
+  '/_app/importar': typeof AppImportarRoute
   '/_app/obras': typeof AppObrasRouteWithChildren
   '/_app/obras/$id': typeof AppObrasIdRoute
 }
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
     | '/clientes'
     | '/dashboard'
     | '/fluxo'
+    | '/importar'
     | '/obras'
     | '/obras/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -104,6 +114,7 @@ export interface FileRouteTypes {
     | '/clientes'
     | '/dashboard'
     | '/fluxo'
+    | '/importar'
     | '/obras'
     | '/obras/$id'
   id:
@@ -114,6 +125,7 @@ export interface FileRouteTypes {
     | '/_app/clientes'
     | '/_app/dashboard'
     | '/_app/fluxo'
+    | '/_app/importar'
     | '/_app/obras'
     | '/_app/obras/$id'
   fileRoutesById: FileRoutesById
@@ -152,6 +164,13 @@ declare module '@tanstack/react-router' {
       path: '/obras'
       fullPath: '/obras'
       preLoaderRoute: typeof AppObrasRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/importar': {
+      id: '/_app/importar'
+      path: '/importar'
+      fullPath: '/importar'
+      preLoaderRoute: typeof AppImportarRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/fluxo': {
@@ -201,6 +220,7 @@ interface AppRouteChildren {
   AppClientesRoute: typeof AppClientesRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppFluxoRoute: typeof AppFluxoRoute
+  AppImportarRoute: typeof AppImportarRoute
   AppObrasRoute: typeof AppObrasRouteWithChildren
 }
 
@@ -208,6 +228,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppClientesRoute: AppClientesRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppFluxoRoute: AppFluxoRoute,
+  AppImportarRoute: AppImportarRoute,
   AppObrasRoute: AppObrasRouteWithChildren,
 }
 

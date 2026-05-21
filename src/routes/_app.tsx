@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { LayoutDashboard, HardHat, Users, Wallet, LogOut } from "lucide-react";
+import { LayoutDashboard, HardHat, Users, Wallet, LogOut, Upload } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ const nav = [
   { to: "/obras", label: "Obras", icon: HardHat },
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/fluxo", label: "Fluxo de Caixa", icon: Wallet },
+  { to: "/importar", label: "Importar", icon: Upload },
 ];
 
 function AppLayout() {

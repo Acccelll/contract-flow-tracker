@@ -467,9 +467,13 @@ function CronogramaImporter() {
       }
       const rows = escolhidas.map((t, i) => {
         const wbs = t.wbs ? `${t.wbs} ` : "";
+        const chain = parentChain(t)
+          .map((p) => (p.wbs ? `${p.wbs} ${p.name}` : p.name))
+          .join(" › ");
+        const contexto = chain ? `  ·  [${chain}]` : "";
         return {
           obra_id: obraId,
-          descricao: wbs + t.name,
+          descricao: wbs + t.name + contexto,
           data_inicio: t.start!,
           data_fim: t.finish!,
           ordem: i,

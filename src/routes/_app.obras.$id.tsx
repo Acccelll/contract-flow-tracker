@@ -307,6 +307,19 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
     const dataEmissao = f.data_emissao ? parseISO(f.data_emissao) : new Date();
     const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
     const valor = Number(f.valor || 0);
+
+    let pdf_url: string | null = null;
+    if (f.pdf instanceof File) {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (uid) {
+        const path = `${uid}/${obra.id}/${Date.now()}-${f.pdf.name}`;
+        const { error: upErr } = await supabase.storage.from("nfs").upload(path, f.pdf, { upsert: false });
+        if (upErr) return toast.error(`Upload PDF: ${upErr.message}`);
+        pdf_url = path;
+      }
+    }
+
     const { data: nf, error } = await supabase.from("notas_fiscais").insert({
       obra_id: obra.id,
       medicao_id: f.medicao_id || null,
@@ -314,9 +327,9 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       data_emissao: f.data_emissao || null,
       valor,
       data_vencimento: venc.toISOString().slice(0, 10),
+      pdf_url,
     }).select().single();
     if (error || !nf) return toast.error(error?.message ?? "Erro");
-    // criar recebimento previsto vinculado à NF
     await supabase.from("recebimentos").insert({
       obra_id: obra.id,
       nota_fiscal_id: nf.id,
@@ -328,11 +341,16 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
       congelado: true,
     });
 
-    // recalcular previsão: redistribuir saldo entre parcelas futuras sem NF
     await recalcularPrevisaoNF(obra.id, Number(obra.valor_contrato));
     toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")} · previsão recalculada`);
     setOpen(false); setF({});
     onChange();
+  }
+
+  async function abrirPdf(path: string) {
+    const { data, error } = await supabase.storage.from("nfs").createSignedUrl(path, 60);
+    if (error || !data) return toast.error("Erro ao gerar link");
+    window.open(data.signedUrl, "_blank");
   }
 
 

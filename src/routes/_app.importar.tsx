@@ -466,13 +466,15 @@ function CronogramaImporter() {
           data_inicio: t.start!,
           data_fim: t.finish!,
           ordem: i,
-          percentual_previsto: Number(((dias(t.start!, t.finish!) / totalDias) * 100).toFixed(2)),
+          custo: Number((t.custo || 0).toFixed(2)),
+          percentual_previsto: Number(pctOf(t).toFixed(2)),
         };
       });
       const { error } = await supabase.from("cronograma_itens").insert(rows);
       if (error) throw error;
       setDone(rows.length);
       toast.success(`${rows.length} itens de cronograma importados`);
+
     } catch (err: any) {
       toast.error(err.message);
     } finally {

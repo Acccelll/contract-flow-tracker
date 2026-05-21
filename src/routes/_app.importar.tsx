@@ -613,7 +613,9 @@ function CronogramaImporter() {
                       <TableCell className="whitespace-nowrap">{t.start ?? "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{t.finish ?? "—"}</TableCell>
                       <TableCell className="text-right">{d || (t.isMilestone ? "0" : "—")}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">{t.custo ? brl(t.custo) : "—"}</TableCell>
                       <TableCell className="text-right">{pct ? pct.toFixed(1) + "%" : "—"}</TableCell>
+
                     </TableRow>
                   );
                 })}

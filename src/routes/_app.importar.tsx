@@ -576,9 +576,10 @@ function CronogramaImporter() {
               <TableBody>
                 {visibleTasks.map((t) => {
                   const d = t.start && t.finish ? dias(t.start, t.finish) : 0;
-                  const pct = selected[t.uid] && d > 0 ? (d / totalDias) * 100 : 0;
+                  const pct = selected[t.uid] ? pctOf(t) : 0;
                   const isSummary = t.hasChildren || t.isSummary;
                   const isCollapsed = collapsed.has(t.uid);
+
                   return (
                     <TableRow key={t.uid} className={isSummary ? "bg-muted/40" : ""}>
                       <TableCell>

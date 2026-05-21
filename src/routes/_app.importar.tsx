@@ -569,8 +569,10 @@ function CronogramaImporter() {
                 <TableHead>Início</TableHead>
                 <TableHead>Fim</TableHead>
                 <TableHead className="text-right">Dias</TableHead>
+                <TableHead className="text-right">Custo</TableHead>
                 <TableHead className="text-right">% previsto</TableHead>
               </TableRow></TableHeader>
+
               <TableBody>
                 {visibleTasks.map((t) => {
                   const d = t.start && t.finish ? dias(t.start, t.finish) : 0;

@@ -190,11 +190,10 @@ function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes:
     const dataAprov = new Date().toISOString().slice(0, 10);
     const { error } = await supabase.from("medicoes").update({ status: "aprovada", data_aprovacao: dataAprov }).eq("id", m.id);
     if (error) return toast.error(error.message);
-    // recalcular previsão dinâmica: redistribuir saldo
-    await recalcularPrevisao(obra, medicoes.map((x) => x.id === m.id ? { ...x, status: "aprovada", data_aprovacao: dataAprov } : x), receb);
-    toast.success("Medição aprovada e previsão recalculada");
+    toast.success("Medição aprovada");
     onChange();
   }
+
 
   return (
     <Card>
@@ -246,27 +245,31 @@ function NfsTab({ obra, nfs, medicoes, onChange }: { obra: any; nfs: any[]; medi
     e.preventDefault();
     const dataEmissao = f.data_emissao ? parseISO(f.data_emissao) : new Date();
     const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+    const valor = Number(f.valor || 0);
     const { data: nf, error } = await supabase.from("notas_fiscais").insert({
       obra_id: obra.id,
       medicao_id: f.medicao_id || null,
       numero: f.numero || null,
       data_emissao: f.data_emissao || null,
-      valor: Number(f.valor || 0),
+      valor,
       data_vencimento: venc.toISOString().slice(0, 10),
     }).select().single();
     if (error || !nf) return toast.error(error?.message ?? "Erro");
-    // criar recebimento previsto
+    // criar recebimento previsto vinculado à NF
     await supabase.from("recebimentos").insert({
       obra_id: obra.id,
       nota_fiscal_id: nf.id,
       data_prevista: venc.toISOString().slice(0, 10),
-      valor_previsto: Number(f.valor || 0),
+      valor_previsto: valor,
       status: "a_receber",
     });
-    toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")}`);
+    // recalcular previsão: redistribuir saldo entre parcelas futuras sem NF
+    await recalcularPrevisaoNF(obra.id, Number(obra.valor_contrato));
+    toast.success(`NF salva · vencimento ${format(venc, "dd/MM/yyyy")} · previsão recalculada`);
     setOpen(false); setF({});
     onChange();
   }
+
 
   return (
     <Card>
@@ -367,19 +370,29 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="secondary" className={m[status] ?? ""}>{status}</Badge>;
 }
 
-// Redistribui o saldo previsto entre as parcelas a receber futuras
-async function recalcularPrevisao(obra: any, medicoes: any[], receb: any[]) {
-  const valorContrato = Number(obra.valor_contrato);
-  // soma de medições aprovadas (já realizado)
-  const realizado = medicoes.filter((m) => m.status === "aprovada").reduce((a, m) => a + Number(m.valor), 0);
-  // parcelas futuras (sem recebimento ainda e sem NF vinculada)
-  const futuras = receb.filter((r) => !r.data_recebimento && !r.nota_fiscal_id);
+// Recalcula previsões futuras após emissão de NF.
+// Saldo = valor do contrato - soma das NFs emitidas. Esse saldo é redistribuído
+// proporcionalmente entre as parcelas previstas que ainda não têm NF vinculada
+// nem recebimento confirmado.
+async function recalcularPrevisaoNF(obraId: string, valorContrato: number) {
+  const [{ data: nfs }, { data: receb }] = await Promise.all([
+    supabase.from("notas_fiscais").select("valor").eq("obra_id", obraId),
+    supabase.from("recebimentos").select("*").eq("obra_id", obraId),
+  ]);
+  const faturado = (nfs ?? []).reduce((a, n) => a + Number(n.valor || 0), 0);
+  const futuras = (receb ?? []).filter((r) => !r.data_recebimento && !r.nota_fiscal_id);
   const totalFuturo = futuras.reduce((a, r) => a + Number(r.valor_previsto), 0);
-  const saldo = Math.max(0, valorContrato - realizado);
-  if (futuras.length === 0 || totalFuturo === 0) return;
-  for (const r of futuras) {
-    const prop = Number(r.valor_previsto) / totalFuturo;
-    const novo = saldo * prop;
-    await supabase.from("recebimentos").update({ valor_previsto: novo }).eq("id", r.id);
+  const saldo = Math.max(0, valorContrato - faturado);
+  if (futuras.length === 0) return;
+  if (totalFuturo === 0) {
+    // distribuir saldo igualmente
+    const v = saldo / futuras.length;
+    await Promise.all(futuras.map((r) => supabase.from("recebimentos").update({ valor_previsto: v }).eq("id", r.id)));
+    return;
   }
+  await Promise.all(futuras.map((r) => {
+    const prop = Number(r.valor_previsto) / totalFuturo;
+    return supabase.from("recebimentos").update({ valor_previsto: saldo * prop }).eq("id", r.id);
+  }));
 }
+

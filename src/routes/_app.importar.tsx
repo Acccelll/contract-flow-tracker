@@ -383,46 +383,53 @@ function CronogramaImporter() {
     reader.readAsText(file);
   }
 
-  const escolhidas = tasks.filter((t) => selected[t.uid] && t.start && t.finish);
+  // Somente folhas (tarefas mais profundas de cada ramo) entram nos totais e
+  // na importação. Resumos são apenas contexto visual / hierarquia do Project.
+  const escolhidas = tasks.filter((t) => !t.hasChildren && selected[t.uid] && t.start && t.finish);
   const totalDias = escolhidas.reduce((acc, t) => acc + dias(t.start!, t.finish!), 0) || 1;
   const totalCusto = escolhidas.reduce((acc, t) => acc + (t.custo || 0), 0);
   // se a opção for "custo" mas a seleção não tiver nenhum valor, cai para "dias"
   const modoEfetivo: "custo" | "dias" = ponderacao === "custo" && totalCusto > 0 ? "custo" : "dias";
 
   function pctOf(t: MppTask): number {
+    if (t.hasChildren) return 0;
     if (!t.start || !t.finish) return 0;
     if (modoEfetivo === "custo") return totalCusto > 0 ? ((t.custo || 0) / totalCusto) * 100 : 0;
     return (dias(t.start, t.finish) / totalDias) * 100;
   }
 
-
-  const selSet = new Set(escolhidas.map((t) => t.uid));
-  let sobreposicoes = 0;
-  for (const t of escolhidas) {
-    let p = t.parentUid;
-    while (p) {
-      if (selSet.has(p)) { sobreposicoes++; break; }
-      p = byUid.get(p)?.parentUid;
+  // Roll-up de custo apenas para exibição em linhas de resumo (não entra no total).
+  const rollupCusto = new Map<string, number>();
+  for (const t of tasks) {
+    if (t.hasChildren) {
+      const desc = descendants(t.uid).filter((d) => !d.hasChildren);
+      rollupCusto.set(t.uid, desc.reduce((acc, d) => acc + (d.custo || 0), 0));
     }
   }
 
-  const niveisPresentes = Array.from(new Set(tasks.map((t) => t.outlineLevel))).sort((a, b) => a - b);
+  // Cadeia de pais (do mais próximo ao mais distante) para preservar contexto na descrição.
+  function parentChain(t: MppTask): MppTask[] {
+    const chain: MppTask[] = [];
+    let p = t.parentUid;
+    while (p) {
+      const pt = byUid.get(p);
+      if (!pt) break;
+      chain.push(pt);
+      p = pt.parentUid;
+    }
+    return chain.reverse();
+  }
 
   function setAll(predicate: (t: MppTask) => boolean) {
     const next: Record<string, boolean> = {};
-    tasks.forEach((t) => { if (predicate(t)) next[t.uid] = true; });
+    tasks.forEach((t) => { if (!t.hasChildren && predicate(t)) next[t.uid] = true; });
     setSelected(next);
   }
 
   function toggleSelect(t: MppTask, value: boolean) {
-    setSelected((s) => {
-      const next = { ...s, [t.uid]: value };
-      // propaga para descendentes
-      if (t.hasChildren) {
-        for (const d of descendants(t.uid)) next[d.uid] = value;
-      }
-      return next;
-    });
+    // Resumos não são selecionáveis — apenas folhas contribuem.
+    if (t.hasChildren) return;
+    setSelected((s) => ({ ...s, [t.uid]: value }));
   }
 
   function toggleCollapse(uid: string) {

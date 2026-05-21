@@ -92,7 +92,7 @@ function ObraDetail() {
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="cronograma"><CronogramaTab obraId={id} valorContrato={Number(obra.valor_contrato)} itens={crono ?? []} /></TabsContent>
+        <TabsContent value="cronograma"><CronogramaTab obra={obra} itens={crono ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["crono", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="medicoes"><MedicoesTab obra={obra} medicoes={medicoes ?? []} receb={receb ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["medicoes", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
@@ -101,8 +101,9 @@ function ObraDetail() {
   );
 }
 
-function CronogramaTab({ obraId, valorContrato, itens }: { obraId: string; valorContrato: number; itens: any[] }) {
-  const qc = useQueryClient();
+function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onChange: () => void }) {
+  const obraId = obra.id;
+  const valorContrato = Number(obra.valor_contrato);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
   const total = itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
@@ -120,30 +121,59 @@ function CronogramaTab({ obraId, valorContrato, itens }: { obraId: string; valor
     if (error) return toast.error(error.message);
     toast.success("Janela adicionada");
     setOpen(false); setF({});
-    qc.invalidateQueries({ queryKey: ["crono", obraId] });
+    onChange();
   }
   async function remove(id: string) {
     await supabase.from("cronograma_itens").delete().eq("id", id);
-    qc.invalidateQueries({ queryKey: ["crono", obraId] });
+    onChange();
+  }
+
+  async function gerarPrevisao() {
+    if (itens.length === 0) return toast.error("Cadastre o cronograma primeiro");
+    // remove previsões anteriores ainda sem NF e sem recebimento
+    const { data: receb } = await supabase.from("recebimentos").select("id, nota_fiscal_id, data_recebimento").eq("obra_id", obraId);
+    const apagar = (receb ?? []).filter((r) => !r.nota_fiscal_id && !r.data_recebimento).map((r) => r.id);
+    if (apagar.length) await supabase.from("recebimentos").delete().in("id", apagar);
+
+    const prazoNF = Number(obra.prazo_emitir_nf_dias || 0);
+    const linhas = itens.map((i) => {
+      const valor = (Number(i.percentual_previsto) / 100) * valorContrato;
+      const dataEmissao = addDays(parseISO(i.data_fim), prazoNF);
+      const venc = calcularVencimento(dataEmissao, Number(obra.prazo_pagamento_dias || 0), obra.dia_fixo_pagamento);
+      return {
+        obra_id: obraId,
+        data_prevista: venc.toISOString().slice(0, 10),
+        valor_previsto: valor,
+        status: "previsto" as const,
+        observacoes: `Janela ${format(parseISO(i.data_inicio), "dd/MM/yy")}–${format(parseISO(i.data_fim), "dd/MM/yy")} · ${Number(i.percentual_previsto).toFixed(2)}%`,
+      };
+    });
+    const { error } = await supabase.from("recebimentos").insert(linhas);
+    if (error) return toast.error(error.message);
+    toast.success(`${linhas.length} parcelas previstas geradas`);
+    onChange();
   }
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
         <CardTitle>Cronograma · {total.toFixed(2)}% planejado</CardTitle>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-2" />Janela</Button></DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Nova janela do cronograma</DialogTitle></DialogHeader>
-            <form onSubmit={save} className="grid grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1.5"><Label>Descrição</Label><Input value={f.descricao ?? ""} onChange={(e) => setF({ ...f, descricao: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Início</Label><Input type="date" required value={f.data_inicio ?? ""} onChange={(e) => setF({ ...f, data_inicio: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Fim</Label><Input type="date" required value={f.data_fim ?? ""} onChange={(e) => setF({ ...f, data_fim: e.target.value })} /></div>
-              <div className="col-span-2 space-y-1.5"><Label>% previsto no período</Label><Input type="number" step="0.0001" required value={f.percentual_previsto ?? ""} onChange={(e) => setF({ ...f, percentual_previsto: e.target.value })} /></div>
-              <DialogFooter className="col-span-2"><Button type="submit">Adicionar</Button></DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={gerarPrevisao}><FileText className="h-4 w-4 mr-2" />Gerar previsão</Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-2" />Janela</Button></DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Nova janela do cronograma</DialogTitle></DialogHeader>
+              <form onSubmit={save} className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1.5"><Label>Descrição</Label><Input value={f.descricao ?? ""} onChange={(e) => setF({ ...f, descricao: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Início</Label><Input type="date" required value={f.data_inicio ?? ""} onChange={(e) => setF({ ...f, data_inicio: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Fim</Label><Input type="date" required value={f.data_fim ?? ""} onChange={(e) => setF({ ...f, data_fim: e.target.value })} /></div>
+                <div className="col-span-2 space-y-1.5"><Label>% previsto no período</Label><Input type="number" step="0.0001" required value={f.percentual_previsto ?? ""} onChange={(e) => setF({ ...f, percentual_previsto: e.target.value })} /></div>
+                <DialogFooter className="col-span-2"><Button type="submit">Adicionar</Button></DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </CardHeader>
       <CardContent>
         <Table>
@@ -161,10 +191,14 @@ function CronogramaTab({ obraId, valorContrato, itens }: { obraId: string; valor
             {itens.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Cadastre as janelas do cronograma</TableCell></TableRow>}
           </TableBody>
         </Table>
+        {total > 0 && Math.abs(total - 100) > 0.01 && (
+          <p className="text-xs text-amber-600 mt-3">Atenção: soma do cronograma é {total.toFixed(2)}% (ideal 100%).</p>
+        )}
       </CardContent>
     </Card>
   );
 }
+
 
 function MedicoesTab({ obra, medicoes, receb, onChange }: { obra: any; medicoes: any[]; receb: any[]; onChange: () => void }) {
   const [open, setOpen] = useState(false);

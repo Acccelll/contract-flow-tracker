@@ -541,24 +541,13 @@ function CronogramaImporter() {
             <div>
               <CardTitle>Tarefas do cronograma ({tasks.length})</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {escolhidas.length} selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
-                {sobreposicoes > 0 && (
-                  <span className="ml-2 inline-flex items-center rounded bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 text-[11px]">
-                    ⚠ {sobreposicoes} sobreposição{sobreposicoes > 1 ? "ões" : ""} pai/filho — a soma passará de 100%
-                  </span>
-                )}
+                {escolhidas.length} folhas selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
               </p>
 
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren)}>Folhas</Button>
-              <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren && !!t.start && !!t.finish && dias(t.start, t.finish) > 0)}>Folhas c/ duração</Button>
-              {niveisPresentes.map((n) => (
-                <Button key={n} variant="outline" size="sm" onClick={() => setAll((t) => t.outlineLevel === n)}>
-                  Nível {n}
-                </Button>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setAll(() => true)}>Tudo</Button>
+              <Button variant="outline" size="sm" onClick={() => setAll(() => true)}>Todas as folhas</Button>
+              <Button variant="outline" size="sm" onClick={() => setAll((t) => !!t.start && !!t.finish && dias(t.start, t.finish) > 0)}>Folhas c/ duração</Button>
               <Button variant="outline" size="sm" onClick={() => setSelected({})}>Limpar</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set(tasks.filter((t) => t.hasChildren).map((t) => t.uid)))}>Recolher tudo</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set())}>Expandir tudo</Button>

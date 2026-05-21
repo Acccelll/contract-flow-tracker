@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { brl } from "@/lib/billing";
 import { Upload, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 
-export const Route = createFileRoute("/_app/importar")({ component: Importar });
+export const Route = createFileRoute("/_app/importar")({
+  component: Importar,
+  ssr: false,
+});
 
 type Row = {
   codigo: string;
@@ -35,11 +37,10 @@ function num(v: any): number {
   return Number(s) || 0;
 }
 
-function dateStr(v: any): string | undefined {
+function dateStr(v: any, XLSX: any): string | undefined {
   if (!v) return undefined;
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   if (typeof v === "number") {
-    // Excel serial date
     const d = XLSX.SSF.parse_date_code(v);
     if (!d) return undefined;
     return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
@@ -72,8 +73,9 @@ function Importar() {
     if (!file) return;
     setDone(null);
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
+        const XLSX = await import("xlsx");
         const wb = XLSX.read(ev.target?.result, { type: "binary", cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const json: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
@@ -83,8 +85,8 @@ function Importar() {
             nome: String(pick(r, ["obra", "nome"]) ?? "").trim(),
             cliente: String(pick(r, ["cliente"]) ?? "").trim(),
             valor_contrato: num(pick(r, ["valor contrato", "valor do contrato", "contrato", "valor"])),
-            data_inicio: dateStr(pick(r, ["início", "inicio", "data inicio"])),
-            data_fim: dateStr(pick(r, ["fim", "término", "termino", "data fim"])),
+            data_inicio: dateStr(pick(r, ["início", "inicio", "data inicio"]), XLSX),
+            data_fim: dateStr(pick(r, ["fim", "término", "termino", "data fim"]), XLSX),
             local: String(pick(r, ["local", "endereço", "endereco"]) ?? "").trim() || undefined,
             pedido_contrato: String(pick(r, ["pedido", "contrato nº", "contrato n"]) ?? "").trim() || undefined,
             percentual_antecipacao: num(pick(r, ["antecipa"])),

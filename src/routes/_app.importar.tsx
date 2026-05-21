@@ -383,46 +383,53 @@ function CronogramaImporter() {
     reader.readAsText(file);
   }
 
-  const escolhidas = tasks.filter((t) => selected[t.uid] && t.start && t.finish);
+  // Somente folhas (tarefas mais profundas de cada ramo) entram nos totais e
+  // na importação. Resumos são apenas contexto visual / hierarquia do Project.
+  const escolhidas = tasks.filter((t) => !t.hasChildren && selected[t.uid] && t.start && t.finish);
   const totalDias = escolhidas.reduce((acc, t) => acc + dias(t.start!, t.finish!), 0) || 1;
   const totalCusto = escolhidas.reduce((acc, t) => acc + (t.custo || 0), 0);
   // se a opção for "custo" mas a seleção não tiver nenhum valor, cai para "dias"
   const modoEfetivo: "custo" | "dias" = ponderacao === "custo" && totalCusto > 0 ? "custo" : "dias";
 
   function pctOf(t: MppTask): number {
+    if (t.hasChildren) return 0;
     if (!t.start || !t.finish) return 0;
     if (modoEfetivo === "custo") return totalCusto > 0 ? ((t.custo || 0) / totalCusto) * 100 : 0;
     return (dias(t.start, t.finish) / totalDias) * 100;
   }
 
-
-  const selSet = new Set(escolhidas.map((t) => t.uid));
-  let sobreposicoes = 0;
-  for (const t of escolhidas) {
-    let p = t.parentUid;
-    while (p) {
-      if (selSet.has(p)) { sobreposicoes++; break; }
-      p = byUid.get(p)?.parentUid;
+  // Roll-up de custo apenas para exibição em linhas de resumo (não entra no total).
+  const rollupCusto = new Map<string, number>();
+  for (const t of tasks) {
+    if (t.hasChildren) {
+      const desc = descendants(t.uid).filter((d) => !d.hasChildren);
+      rollupCusto.set(t.uid, desc.reduce((acc, d) => acc + (d.custo || 0), 0));
     }
   }
 
-  const niveisPresentes = Array.from(new Set(tasks.map((t) => t.outlineLevel))).sort((a, b) => a - b);
+  // Cadeia de pais (do mais próximo ao mais distante) para preservar contexto na descrição.
+  function parentChain(t: MppTask): MppTask[] {
+    const chain: MppTask[] = [];
+    let p = t.parentUid;
+    while (p) {
+      const pt = byUid.get(p);
+      if (!pt) break;
+      chain.push(pt);
+      p = pt.parentUid;
+    }
+    return chain.reverse();
+  }
 
   function setAll(predicate: (t: MppTask) => boolean) {
     const next: Record<string, boolean> = {};
-    tasks.forEach((t) => { if (predicate(t)) next[t.uid] = true; });
+    tasks.forEach((t) => { if (!t.hasChildren && predicate(t)) next[t.uid] = true; });
     setSelected(next);
   }
 
   function toggleSelect(t: MppTask, value: boolean) {
-    setSelected((s) => {
-      const next = { ...s, [t.uid]: value };
-      // propaga para descendentes
-      if (t.hasChildren) {
-        for (const d of descendants(t.uid)) next[d.uid] = value;
-      }
-      return next;
-    });
+    // Resumos não são selecionáveis — apenas folhas contribuem.
+    if (t.hasChildren) return;
+    setSelected((s) => ({ ...s, [t.uid]: value }));
   }
 
   function toggleCollapse(uid: string) {
@@ -460,9 +467,13 @@ function CronogramaImporter() {
       }
       const rows = escolhidas.map((t, i) => {
         const wbs = t.wbs ? `${t.wbs} ` : "";
+        const chain = parentChain(t)
+          .map((p) => (p.wbs ? `${p.wbs} ${p.name}` : p.name))
+          .join(" › ");
+        const contexto = chain ? `  ·  [${chain}]` : "";
         return {
           obra_id: obraId,
-          descricao: wbs + t.name,
+          descricao: wbs + t.name + contexto,
           data_inicio: t.start!,
           data_fim: t.finish!,
           ordem: i,
@@ -506,7 +517,7 @@ function CronogramaImporter() {
               </Select>
             </div>
           </div>
-          {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas · níveis {niveisPresentes.join(", ")}</p>}
+          {titulo && <p className="text-xs text-muted-foreground">Projeto: <strong>{titulo}</strong> · {tasks.length} tarefas · {tasks.filter((t) => !t.hasChildren).length} folhas</p>}
           <label className="flex items-center gap-2 text-sm">
             <Checkbox checked={substituir} onCheckedChange={(v) => setSubstituir(!!v)} />
             Substituir cronograma existente da obra (recomendado — evita duplicar itens em reimportações)
@@ -534,24 +545,13 @@ function CronogramaImporter() {
             <div>
               <CardTitle>Tarefas do cronograma ({tasks.length})</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {escolhidas.length} selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
-                {sobreposicoes > 0 && (
-                  <span className="ml-2 inline-flex items-center rounded bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 text-[11px]">
-                    ⚠ {sobreposicoes} sobreposição{sobreposicoes > 1 ? "ões" : ""} pai/filho — a soma passará de 100%
-                  </span>
-                )}
+                {escolhidas.length} folhas selecionadas · {brl(totalCusto)} · {totalDias} dias · ponderação por <strong>{modoEfetivo === "custo" ? "custo" : "duração"}</strong>
               </p>
 
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren)}>Folhas</Button>
-              <Button variant="outline" size="sm" onClick={() => setAll((t) => !t.hasChildren && !!t.start && !!t.finish && dias(t.start, t.finish) > 0)}>Folhas c/ duração</Button>
-              {niveisPresentes.map((n) => (
-                <Button key={n} variant="outline" size="sm" onClick={() => setAll((t) => t.outlineLevel === n)}>
-                  Nível {n}
-                </Button>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setAll(() => true)}>Tudo</Button>
+              <Button variant="outline" size="sm" onClick={() => setAll(() => true)}>Todas as folhas</Button>
+              <Button variant="outline" size="sm" onClick={() => setAll((t) => !!t.start && !!t.finish && dias(t.start, t.finish) > 0)}>Folhas c/ duração</Button>
               <Button variant="outline" size="sm" onClick={() => setSelected({})}>Limpar</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set(tasks.filter((t) => t.hasChildren).map((t) => t.uid)))}>Recolher tudo</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set())}>Expandir tudo</Button>
@@ -583,10 +583,14 @@ function CronogramaImporter() {
                   return (
                     <TableRow key={t.uid} className={isSummary ? "bg-muted/40" : ""}>
                       <TableCell>
-                        <Checkbox
-                          checked={!!selected[t.uid]}
-                          onCheckedChange={(v) => toggleSelect(t, !!v)}
-                        />
+                        {isSummary ? (
+                          <span className="inline-block w-4" />
+                        ) : (
+                          <Checkbox
+                            checked={!!selected[t.uid]}
+                            onCheckedChange={(v) => toggleSelect(t, !!v)}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">{t.wbs}</TableCell>
                       <TableCell>
@@ -612,9 +616,13 @@ function CronogramaImporter() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{t.start ?? "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{t.finish ?? "—"}</TableCell>
-                      <TableCell className="text-right">{d || (t.isMilestone ? "0" : "—")}</TableCell>
-                      <TableCell className="text-right whitespace-nowrap">{t.custo ? brl(t.custo) : "—"}</TableCell>
-                      <TableCell className="text-right">{pct ? pct.toFixed(1) + "%" : "—"}</TableCell>
+                      <TableCell className="text-right">{isSummary ? "—" : (d || (t.isMilestone ? "0" : "—"))}</TableCell>
+                      <TableCell className={`text-right whitespace-nowrap ${isSummary ? "text-muted-foreground italic" : ""}`}>
+                        {isSummary
+                          ? (rollupCusto.get(t.uid) ? brl(rollupCusto.get(t.uid)!) : "—")
+                          : (t.custo ? brl(t.custo) : "—")}
+                      </TableCell>
+                      <TableCell className="text-right">{!isSummary && pct ? pct.toFixed(1) + "%" : "—"}</TableCell>
 
                     </TableRow>
                   );

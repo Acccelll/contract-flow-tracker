@@ -1260,6 +1260,24 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
   const [importing, setImporting] = useState(false);
   const [mppDialogOpen, setMppDialogOpen] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [filtroDiff, setFiltroDiff] = useState("");
+  const [tiposVisiveis, setTiposVisiveis] = useState<Set<DiffRow["tipo"]> | null>(null);
+  const [verTodasRev, setVerTodasRev] = useState(false);
+  const [atrasosAbertos, setAtrasosAbertos] = useState(false);
+  const [atrasosLimite, setAtrasosLimite] = useState(50);
+  const [atrasosFiltro, setAtrasosFiltro] = useState("");
+  const [atrasosMin, setAtrasosMin] = useState<string>("0");
+
+  function resetSheet() {
+    setStep(1);
+    setDiffs(null);
+    setTasksXml([]);
+    setArquivoNome("");
+    setObs("");
+    setFiltroDiff("");
+    setTiposVisiveis(null);
+  }
 
   const obraId = obra.id;
   const valorContrato = Number(obra.valor_contrato || 0);
@@ -1299,6 +1317,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           setTasksXml(tasks);
           const d = computeDiff(leaves, tasks, crono ?? []);
           setDiffs(d);
+          setStep(2);
           const n = d.filter((x) => x.tipo === "novo").length;
           const dt = d.filter((x) => x.tipo === "data").length;
           const pc = d.filter((x) => x.tipo === "pct").length;
@@ -1641,106 +1660,252 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card><CardContent className="pt-6">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">Atraso máximo</div>
-          <div className="text-xl font-semibold mt-1">{atrasoMax} {atrasoMax === 1 ? "dia" : "dias"}</div>
-          <div className="text-xs text-muted-foreground mt-1">{atrasados.length} tarefa(s) atrasada(s)</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-6">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">Revisões registradas</div>
-          <div className="text-xl font-semibold mt-1">{revisoes.length}</div>
-          <div className="text-xs text-muted-foreground mt-1">{revisoes[0] ? `Última: ${format(parseISO(revisoes[0].data_corte), "dd/MM/yyyy")}` : "Nenhuma ainda"}</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-6 flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Importar revisão</div>
-            <div className="text-xs text-muted-foreground mt-1">XML do MS Project</div>
+      {/* Faixa compacta de KPIs + ação */}
+      <Card>
+        <CardContent className="py-3 flex flex-wrap items-center gap-x-8 gap-y-2 justify-between">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Atraso máximo</div>
+              <div className="text-base font-semibold">{atrasoMax} {atrasoMax === 1 ? "dia" : "dias"} <span className="text-xs font-normal text-muted-foreground">· {atrasados.length} atrasada(s)</span></div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Revisões</div>
+              <div className="text-base font-semibold">{revisoes.length} <span className="text-xs font-normal text-muted-foreground">· {revisoes[0] ? `última ${format(parseISO(revisoes[0].data_corte), "dd/MM/yyyy")}` : "nenhuma"}</span></div>
+            </div>
           </div>
-          <Sheet open={open} onOpenChange={setOpen}>
+          <Sheet open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetSheet(); }}>
             <MppNotSupportedDialog open={mppDialogOpen} onOpenChange={setMppDialogOpen} />
             <SheetTrigger asChild><Button><Upload className="h-4 w-4 mr-2" />Nova revisão</Button></SheetTrigger>
-            <SheetContent side="right" className="w-[95vw] sm:max-w-[860px] overflow-y-auto">
-              <SheetHeader><SheetTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Importar revisão semanal</SheetTitle></SheetHeader>
-              <div className="space-y-4 mt-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <Label>Arquivo .xml do Project</Label>
-                      <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground">
-                        Tem .mpp?
-                      </button>
+            <SheetContent side="right" className="w-[95vw] sm:max-w-[900px] overflow-y-auto flex flex-col">
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Importar revisão semanal</SheetTitle>
+                {/* Stepper */}
+                <div className="flex items-center gap-2 mt-3 text-xs">
+                  {[
+                    { n: 1, l: "Arquivo" },
+                    { n: 2, l: "Revisar mudanças" },
+                    { n: 3, l: "Confirmar" },
+                  ].map((s, i) => (
+                    <div key={s.n} className="flex items-center gap-2">
+                      <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-medium ${step === s.n ? "bg-primary text-primary-foreground" : step > s.n ? "bg-emerald-500/15 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{s.n}</div>
+                      <span className={step === s.n ? "font-medium" : "text-muted-foreground"}>{s.l}</span>
+                      {i < 2 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
                     </div>
-                    <Input type="file" accept=".xml,.mpp" onChange={onFile} />
-                  </div>
-                  <div>
-                    <Label>Data de corte</Label>
-                    <Input type="date" value={dataCorte} onChange={(e) => setDataCorte(e.target.value)} />
-                  </div>
+                  ))}
                 </div>
-                <div>
-                  <Label>Observações (opcional)</Label>
-                  <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={atualizarPct} onCheckedChange={setAtualizarPct} id="att-pct" />
-                  <Label htmlFor="att-pct" className="cursor-pointer">Atualizar % realizado pelo PercentComplete do XML (nunca rebaixa lançamento manual maior)</Label>
-                </div>
+              </SheetHeader>
 
-                {diffs && (
-                  <div className="space-y-3">
-                    {grupos.map((g) => {
-                      const linhas = diffs.map((d, i) => ({ d, i })).filter((x) => x.d.tipo === g.tipo);
-                      if (!linhas.length) return null;
-                      const todosOn = linhas.every((x) => x.d.apply);
-                      return (
-                        <Card key={g.tipo}>
-                          <CardHeader className="py-3 flex flex-row items-center justify-between">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <Badge className={g.cor + " border-none"}>{g.label}</Badge>
-                              <span className="text-muted-foreground">{linhas.length}</span>
-                            </CardTitle>
-                            <Button variant="ghost" size="sm" onClick={() => toggleAll(g.tipo, !todosOn)}>{todosOn ? "Desmarcar todos" : "Marcar todos"}</Button>
-                          </CardHeader>
-                          <CardContent className="pt-0">
-                            <Table>
-                              <TableHeader><TableRow>
-                                <TableHead className="w-8"></TableHead>
-                                <TableHead>Tarefa</TableHead>
-                                <TableHead>Antes</TableHead>
-                                <TableHead>Depois</TableHead>
-                              </TableRow></TableHeader>
-                              <TableBody>
-                                {linhas.map(({ d, i }) => (
-                                  <TableRow key={i}>
-                                    <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(i, e.target.checked)} /></TableCell>
-                                    <TableCell className="max-w-[380px] truncate" title={d.descricao}>{d.descricao}</TableCell>
-                                    <TableCell className="text-xs whitespace-nowrap">{formatBefore(d)}</TableCell>
-                                    <TableCell className="text-xs whitespace-nowrap">{formatAfter(d)}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                    {diffs.length === 0 && <div className="text-sm text-muted-foreground">Nenhuma mudança detectada — o cronograma está idêntico ao banco.</div>}
+              <div className="flex-1 mt-4">
+                {step === 1 && (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <Label>Arquivo .xml do MS Project</Label>
+                        <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+                          Tem .mpp? Veja como converter
+                        </button>
+                      </div>
+                      <label className="block border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors">
+                        <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                        <div className="text-sm font-medium">{arquivoNome || "Clique para escolher o arquivo XML"}</div>
+                        <div className="text-xs text-muted-foreground mt-1">Exportado em Arquivo → Salvar como → XML</div>
+                        <Input type="file" accept=".xml,.mpp" onChange={onFile} className="hidden" />
+                      </label>
+                    </div>
+                    <div className="max-w-xs">
+                      <Label>Data de corte</Label>
+                      <Input type="date" value={dataCorte} onChange={(e) => setDataCorte(e.target.value)} />
+                      <div className="text-xs text-muted-foreground mt-1">Data de referência da revisão (semana atual por padrão).</div>
+                    </div>
+                  </div>
+                )}
+
+                {step === 2 && diffs && (() => {
+                  const contagem: Record<DiffRow["tipo"], number> = { novo: 0, data: 0, pct: 0, custo: 0, removido: 0, restaurado: 0 };
+                  for (const d of diffs) contagem[d.tipo]++;
+                  const ativos = tiposVisiveis ?? new Set(grupos.map((g) => g.tipo));
+                  const totalAplicar = diffs.filter((d) => d.apply).length;
+                  return (
+                    <div className="space-y-4">
+                      {diffs.length === 0 ? (
+                        <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                          <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500" />
+                          Cronograma idêntico ao banco — nada a aplicar.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {grupos.map((g) => {
+                              const n = contagem[g.tipo];
+                              if (!n) return null;
+                              const on = ativos.has(g.tipo);
+                              return (
+                                <button
+                                  key={g.tipo}
+                                  type="button"
+                                  onClick={() => {
+                                    setTiposVisiveis((prev) => {
+                                      const cur = new Set(prev ?? grupos.map((x) => x.tipo));
+                                      if (cur.has(g.tipo)) cur.delete(g.tipo); else cur.add(g.tipo);
+                                      return cur;
+                                    });
+                                  }}
+                                  className={`text-xs px-2.5 py-1 rounded-full border transition ${on ? g.cor + " border-transparent" : "text-muted-foreground border-border opacity-60 hover:opacity-100"}`}
+                                >
+                                  {g.label} · {n}
+                                </button>
+                              );
+                            })}
+                            <div className="ml-auto text-xs text-muted-foreground">
+                              {totalAplicar} de {diffs.length} marcadas
+                            </div>
+                          </div>
+
+                          <Input
+                            placeholder="Buscar tarefa por descrição…"
+                            value={filtroDiff}
+                            onChange={(e) => setFiltroDiff(e.target.value)}
+                            className="h-9"
+                          />
+
+                          <div className="space-y-2">
+                            {grupos.map((g) => {
+                              if (!ativos.has(g.tipo)) return null;
+                              const linhas = diffs
+                                .map((d, i) => ({ d, i }))
+                                .filter((x) => x.d.tipo === g.tipo)
+                                .filter((x) => !filtroDiff || x.d.descricao.toLowerCase().includes(filtroDiff.toLowerCase()));
+                              if (!linhas.length) return null;
+                              const todosOn = linhas.every((x) => x.d.apply);
+                              return (
+                                <Collapsible key={g.tipo} defaultOpen={false}>
+                                  <Card>
+                                    <CollapsibleTrigger asChild>
+                                      <CardHeader className="py-2.5 cursor-pointer hover:bg-accent/40 flex flex-row items-center justify-between">
+                                        <CardTitle className="text-sm flex items-center gap-2">
+                                          <ChevronRight className="h-4 w-4 transition-transform data-[state=open]:rotate-90 [[data-state=open]_&]:rotate-90" />
+                                          <Badge className={g.cor + " border-none"}>{g.label}</Badge>
+                                          <span className="text-muted-foreground font-normal">{linhas.length}</span>
+                                        </CardTitle>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => { e.stopPropagation(); toggleAll(g.tipo, !todosOn); }}
+                                        >
+                                          {todosOn ? "Desmarcar todos" : "Marcar todos"}
+                                        </Button>
+                                      </CardHeader>
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent>
+                                      <CardContent className="pt-0">
+                                        <Table>
+                                          <TableHeader><TableRow>
+                                            <TableHead className="w-8"></TableHead>
+                                            <TableHead>Tarefa</TableHead>
+                                            <TableHead>Antes</TableHead>
+                                            <TableHead>Depois</TableHead>
+                                          </TableRow></TableHeader>
+                                          <TableBody>
+                                            {linhas.slice(0, 200).map(({ d, i }) => (
+                                              <TableRow key={i}>
+                                                <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(i, e.target.checked)} /></TableCell>
+                                                <TableCell className="max-w-[380px] truncate" title={d.descricao}>{d.descricao}</TableCell>
+                                                <TableCell className="text-xs whitespace-nowrap">{formatBefore(d)}</TableCell>
+                                                <TableCell className="text-xs whitespace-nowrap">{formatAfter(d)}</TableCell>
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                        {linhas.length > 200 && (
+                                          <p className="text-xs text-muted-foreground mt-2">Mostrando 200 de {linhas.length}. Use a busca acima para refinar.</p>
+                                        )}
+                                      </CardContent>
+                                    </CollapsibleContent>
+                                  </Card>
+                                </Collapsible>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {step === 3 && diffs && (
+                  <div className="space-y-4">
+                    <Card>
+                      <CardContent className="pt-6 space-y-3">
+                        <div className="text-sm text-muted-foreground">Resumo do que será aplicado:</div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {grupos.map((g) => {
+                            const n = diffs.filter((d) => d.tipo === g.tipo && d.apply).length;
+                            if (!n) return null;
+                            return (
+                              <div key={g.tipo} className="rounded-md border p-2 flex items-center justify-between">
+                                <Badge className={g.cor + " border-none"}>{g.label}</Badge>
+                                <span className="font-semibold tabular-nums">{n}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Data de corte: <span className="font-medium text-foreground">{format(parseISO(dataCorte), "dd/MM/yyyy")}</span> · Arquivo: <span className="font-medium text-foreground">{arquivoNome || "—"}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardContent className="pt-6 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <Switch checked={atualizarPct} onCheckedChange={setAtualizarPct} id="att-pct" />
+                          <Label htmlFor="att-pct" className="cursor-pointer text-sm font-normal leading-snug">
+                            Atualizar % realizado pelo PercentComplete do XML
+                            <div className="text-xs text-muted-foreground mt-0.5">Nunca rebaixa um lançamento manual maior.</div>
+                          </Label>
+                        </div>
+                        <div>
+                          <Label>Observações (opcional)</Label>
+                          <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Ex.: revisão pós reunião semanal" />
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
                 )}
               </div>
-              <SheetFooter className="mt-4">
-                <Button disabled={!diffs || diffs.length === 0 || importing} onClick={confirmar}>
-                  {importing ? "Aplicando…" : "Confirmar revisão"}
+
+              <SheetFooter className="mt-4 flex-row justify-between sm:justify-between">
+                <Button variant="ghost" disabled={step === 1} onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}>
+                  Voltar
                 </Button>
+                {step < 3 ? (
+                  <Button
+                    disabled={(step === 1 && !diffs) || (step === 2 && (!diffs || diffs.length === 0))}
+                    onClick={() => setStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}
+                  >
+                    Avançar
+                  </Button>
+                ) : (
+                  <Button disabled={!diffs || diffs.filter((d) => d.apply).length === 0 || importing} onClick={confirmar}>
+                    {importing ? "Aplicando…" : "Confirmar revisão"}
+                  </Button>
+                )}
               </SheetFooter>
             </SheetContent>
           </Sheet>
-        </CardContent></Card>
-      </div>
+        </CardContent>
+      </Card>
 
+      {/* Histórico resumido */}
       <Card>
-        <CardHeader><CardTitle className="text-sm flex items-center gap-2"><History className="h-4 w-4" /> Histórico de revisões</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2"><History className="h-4 w-4" /> Histórico de revisões</CardTitle>
+          {revisoes.length > 3 && (
+            <Button variant="ghost" size="sm" onClick={() => setVerTodasRev((v) => !v)}>
+              {verTodasRev ? "Mostrar últimas 3" : `Ver todas (${revisoes.length})`}
+            </Button>
+          )}
+        </CardHeader>
         <CardContent>
           {revisoes.length === 0 ? (
             <div className="text-sm text-muted-foreground">Nenhuma revisão registrada ainda.</div>
@@ -1750,61 +1915,120 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                 <TableHead className="w-12">#</TableHead>
                 <TableHead>Data de corte</TableHead>
                 <TableHead>Arquivo</TableHead>
-                <TableHead className="text-right">Novos</TableHead>
-                <TableHead className="text-right">Datas</TableHead>
-                <TableHead className="text-right">%</TableHead>
-                <TableHead className="text-right">Removidos</TableHead>
+                <TableHead>Mudanças</TableHead>
                 <TableHead>Importada em</TableHead>
               </TableRow></TableHeader>
               <TableBody>
-                {revisoes.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>{r.numero}</TableCell>
-                    <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
-                    <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
-                    <TableCell className="text-right">{r.totais?.novos ?? 0}</TableCell>
-                    <TableCell className="text-right">{r.totais?.alterados_data ?? 0}</TableCell>
-                    <TableCell className="text-right">{r.totais?.alterados_pct ?? 0}</TableCell>
-                    <TableCell className="text-right">{r.totais?.removidos ?? 0}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
-                  </TableRow>
-                ))}
+                {(verTodasRev ? revisoes : revisoes.slice(0, 3)).map((r) => {
+                  const t = r.totais ?? {};
+                  const chips = [
+                    t.novos ? `+${t.novos} novas` : null,
+                    t.alterados_data ? `${t.alterados_data} datas` : null,
+                    t.alterados_pct ? `${t.alterados_pct} %` : null,
+                    t.removidos ? `${t.removidos} removidas` : null,
+                  ].filter(Boolean);
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell>{r.numero}</TableCell>
+                      <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
+                      <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground" title={`Novos ${t.novos ?? 0} · Datas ${t.alterados_data ?? 0} · % ${t.alterados_pct ?? 0} · Removidos ${t.removidos ?? 0}`}>
+                        {chips.length ? chips.join(" · ") : "sem mudanças"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
 
+      {/* Tarefas com mudança de data — colapsável */}
       {atrasos.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Tarefas com mudança de data vs. baseline</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader><TableRow>
-                <TableHead>Tarefa</TableHead>
-                <TableHead>Fim baseline</TableHead>
-                <TableHead>Fim atual</TableHead>
-                <TableHead className="text-right">Δ dias</TableHead>
-              </TableRow></TableHeader>
-              <TableBody>
-                {atrasos.sort((a, b) => b.delta - a.delta).map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="max-w-[420px] truncate" title={a.descricao}>{a.descricao}</TableCell>
-                    <TableCell>{format(parseISO(a.baseline), "dd/MM/yy")}</TableCell>
-                    <TableCell>{format(parseISO(a.atual), "dd/MM/yy")}</TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant={a.delta > 0 ? "destructive" : "secondary"}>{a.delta > 0 ? `+${a.delta}` : a.delta}</Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <Collapsible open={atrasosAbertos} onOpenChange={setAtrasosAbertos}>
+          <Card>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer hover:bg-accent/40 flex flex-row items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  {atrasosAbertos ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  <AlertCircle className="h-4 w-4 text-amber-500" />
+                  Tarefas com mudança de data vs. baseline
+                  <Badge variant="secondary" className="ml-1">{atrasos.length}</Badge>
+                </CardTitle>
+                <span className="text-xs text-muted-foreground">
+                  {atrasados.length} atrasada(s) · maior Δ {atrasoMax}d
+                </span>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap gap-2 items-center">
+                  <Input
+                    placeholder="Buscar tarefa…"
+                    value={atrasosFiltro}
+                    onChange={(e) => setAtrasosFiltro(e.target.value)}
+                    className="h-9 max-w-xs"
+                  />
+                  <Select value={atrasosMin} onValueChange={setAtrasosMin}>
+                    <SelectTrigger className="h-9 w-[180px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">Todas as mudanças</SelectItem>
+                      <SelectItem value="1">Δ ≥ 1 dia</SelectItem>
+                      <SelectItem value="3">Δ ≥ 3 dias</SelectItem>
+                      <SelectItem value="7">Δ ≥ 7 dias</SelectItem>
+                      <SelectItem value="15">Δ ≥ 15 dias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(() => {
+                  const minN = Number(atrasosMin) || 0;
+                  const filtradas = atrasos
+                    .filter((a) => Math.abs(a.delta) >= minN)
+                    .filter((a) => !atrasosFiltro || a.descricao.toLowerCase().includes(atrasosFiltro.toLowerCase()))
+                    .sort((a, b) => b.delta - a.delta);
+                  const visiveis = filtradas.slice(0, atrasosLimite);
+                  return (
+                    <>
+                      <Table>
+                        <TableHeader><TableRow>
+                          <TableHead>Tarefa</TableHead>
+                          <TableHead>Fim baseline</TableHead>
+                          <TableHead>Fim atual</TableHead>
+                          <TableHead className="text-right">Δ dias</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>
+                          {visiveis.map((a) => (
+                            <TableRow key={a.id}>
+                              <TableCell className="max-w-[420px] truncate" title={a.descricao}>{a.descricao}</TableCell>
+                              <TableCell>{format(parseISO(a.baseline), "dd/MM/yy")}</TableCell>
+                              <TableCell>{format(parseISO(a.atual), "dd/MM/yy")}</TableCell>
+                              <TableCell className="text-right">
+                                <Badge variant={a.delta > 0 ? "destructive" : "secondary"}>{a.delta > 0 ? `+${a.delta}` : a.delta}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Mostrando {visiveis.length} de {filtradas.length}</span>
+                        {filtradas.length > atrasosLimite && (
+                          <Button variant="ghost" size="sm" onClick={() => setAtrasosLimite((n) => n + 50)}>Mostrar mais</Button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       )}
     </div>
   );
 }
+
 
 function formatBefore(d: DiffRow): string {
   if (d.tipo === "novo") return "—";

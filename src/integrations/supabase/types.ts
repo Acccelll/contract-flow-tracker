@@ -659,6 +659,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "recebimentos_nota_fiscal_id_fkey"
+            columns: ["nota_fiscal_id"]
+            isOneToOne: false
+            referencedRelation: "vw_nf_saldo"
+            referencedColumns: ["nota_fiscal_id"]
+          },
+          {
             foreignKeyName: "recebimentos_obra_id_fkey"
             columns: ["obra_id"]
             isOneToOne: false
@@ -669,7 +676,25 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      vw_nf_saldo: {
+        Row: {
+          nota_fiscal_id: string | null
+          numero: string | null
+          obra_id: string | null
+          saldo_aberto: number | null
+          total_recebido: number | null
+          valor_liquido: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notas_fiscais_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       [_ in never]: never

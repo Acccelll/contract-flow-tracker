@@ -2,7 +2,8 @@ import { Fragment, useMemo, useState } from "react";
 import { createFileRoute, useParams, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, CheckCircle2, FileText, Banknote, AlertCircle, ChevronDown, ChevronRight, CalendarClock, Upload, History, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, CheckCircle2, FileText, Banknote, AlertCircle, ChevronDown, ChevronRight, CalendarClock, Upload, History, Trash2, Undo2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1268,7 +1269,9 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [atrasosAbertos, setAtrasosAbertos] = useState(false);
   const [atrasosLimite, setAtrasosLimite] = useState(50);
   const [atrasosFiltro, setAtrasosFiltro] = useState("");
-  const [atrasosMin, setAtrasosMin] = useState<string>("0");
+  const [revertendoId, setRevertendoId] = useState<string | null>(null);
+  const [confirmReverter, setConfirmReverter] = useState<any | null>(null);
+
 
   function resetSheet() {
     setStep(1);
@@ -1650,6 +1653,102 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
     }
   }
 
+  const maxNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
+
+  async function reverterRevisao(rev: any) {
+    if (Number(rev.numero) !== maxNumero) {
+      toast.error("Reverta primeiro a revisão mais recente.");
+      return;
+    }
+    setRevertendoId(rev.id);
+    try {
+      const { data: snaps, error: snapErr } = await supabase
+        .from("cronograma_item_revisoes")
+        .select("id, cronograma_item_id, tipo_mudanca, data_inicio_anterior, data_fim_anterior, percentual_realizado_anterior, custo_anterior")
+        .eq("revisao_id", rev.id);
+      if (snapErr) throw snapErr;
+
+      const novos = (snaps ?? []).filter((s) => s.tipo_mudanca === "novo");
+      const novosIds = novos.map((s) => s.cronograma_item_id);
+
+      // Bloqueia se algum item "novo" tem medição lançada
+      if (novosIds.length) {
+        const { data: meds, error: medErr } = await supabase
+          .from("itens_medicao")
+          .select("cronograma_item_id")
+          .in("cronograma_item_id", novosIds)
+          .limit(1);
+        if (medErr) throw medErr;
+        if (meds && meds.length > 0) {
+          toast.error("Há itens desta revisão com medição lançada. Cancele/exclua a medição antes de reverter, ou use 'Limpar importados'.", { duration: 8000 });
+          return;
+        }
+      }
+
+      // Aplica reversão item a item (não-novos)
+      for (const s of snaps ?? []) {
+        if (s.tipo_mudanca === "novo") continue;
+        if (!s.cronograma_item_id) continue;
+        const upd: any = {};
+        if (s.tipo_mudanca === "data") {
+          upd.data_inicio = s.data_inicio_anterior;
+          upd.data_fim = s.data_fim_anterior;
+        } else if (s.tipo_mudanca === "pct") {
+          upd.percentual_realizado = s.percentual_realizado_anterior ?? 0;
+        } else if (s.tipo_mudanca === "custo") {
+          upd.custo = s.custo_anterior ?? 0;
+        } else if (s.tipo_mudanca === "removido") {
+          upd.ativo = true;
+        } else if (s.tipo_mudanca === "restaurado") {
+          upd.ativo = false;
+        }
+        if (Object.keys(upd).length) {
+          const { error } = await supabase.from("cronograma_itens").update(upd).eq("id", s.cronograma_item_id);
+          if (error) throw error;
+        }
+      }
+
+      // Apaga dependências e itens criados pela revisão
+      if (novosIds.length) {
+        await supabase.from("cronograma_dependencias").delete().in("item_id", novosIds);
+        const { error: delErr } = await supabase.from("cronograma_itens").delete().in("id", novosIds);
+        if (delErr) throw delErr;
+      }
+
+      // Recalcula percentual_previsto proporcional ao custo_baseline
+      const { data: vivos } = await supabase
+        .from("cronograma_itens")
+        .select("id, custo, custo_baseline")
+        .eq("obra_id", obraId)
+        .eq("ativo", true);
+      const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+      const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
+      if (totalCusto > 0) {
+        await Promise.all(
+          (vivos ?? []).map((i) =>
+            supabase
+              .from("cronograma_itens")
+              .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
+              .eq("id", i.id),
+          ),
+        );
+      }
+
+      // Remove snapshots + cabeçalho da revisão
+      await supabase.from("cronograma_item_revisoes").delete().eq("revisao_id", rev.id);
+      const { error: delRevErr } = await supabase.from("cronograma_revisoes").delete().eq("id", rev.id);
+      if (delRevErr) throw delRevErr;
+
+      toast.success(`Revisão #${rev.numero} revertida`);
+      setConfirmReverter(null);
+      onChange();
+    } catch (e: any) {
+      toast.error("Falha ao reverter: " + (e?.message ?? "erro desconhecido"));
+    } finally {
+      setRevertendoId(null);
+    }
+  }
+
   const grupos: { tipo: DiffRow["tipo"]; label: string; cor: string }[] = [
     { tipo: "novo", label: "Novos", cor: "bg-blue-500/15 text-blue-700" },
     { tipo: "data", label: "Datas alteradas", cor: "bg-amber-500/15 text-amber-700" },
@@ -1919,6 +2018,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                 <TableHead>Arquivo</TableHead>
                 <TableHead>Mudanças</TableHead>
                 <TableHead>Importada em</TableHead>
+                <TableHead className="w-24 text-right">Ações</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {(verTodasRev ? revisoes : revisoes.slice(0, 3)).map((r) => {
@@ -1930,6 +2030,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                     t.removidos ? `${t.removidos} removidas` : null,
                   ].filter(Boolean);
                   const aberta = revExpandida === r.id;
+                  const podeReverter = Number(r.numero) === maxNumero;
                   return (
                     <Fragment key={r.id}>
                       <TableRow
@@ -1946,10 +2047,22 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           {chips.length ? chips.join(" · ") : "sem mudanças"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!podeReverter || revertendoId === r.id}
+                            title={podeReverter ? "Reverter esta revisão" : `Reverta primeiro a revisão #${maxNumero}`}
+                            onClick={() => setConfirmReverter(r)}
+                          >
+                            <Undo2 className="h-4 w-4 mr-1" />
+                            Reverter
+                          </Button>
+                        </TableCell>
                       </TableRow>
                       {aberta && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
-                          <TableCell colSpan={6} className="p-0">
+                          <TableCell colSpan={7} className="p-0">
                             <RevisaoDetalhes revisaoId={r.id} />
                           </TableCell>
                         </TableRow>
@@ -1962,6 +2075,48 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!confirmReverter} onOpenChange={(v) => !v && setConfirmReverter(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reverter revisão #{confirmReverter?.numero}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Data de corte:</span>{" "}
+                  {confirmReverter && format(parseISO(confirmReverter.data_corte), "dd/MM/yyyy")}
+                  {confirmReverter?.arquivo_nome ? <> · <span className="font-mono text-xs">{confirmReverter.arquivo_nome}</span></> : null}
+                </div>
+                {confirmReverter && (
+                  <div className="text-xs text-muted-foreground">
+                    {[
+                      confirmReverter.totais?.novos ? `+${confirmReverter.totais.novos} novas` : null,
+                      confirmReverter.totais?.alterados_data ? `${confirmReverter.totais.alterados_data} datas` : null,
+                      confirmReverter.totais?.alterados_pct ? `${confirmReverter.totais.alterados_pct} %` : null,
+                      confirmReverter.totais?.alterados_custo ? `${confirmReverter.totais.alterados_custo} custo` : null,
+                      confirmReverter.totais?.removidos ? `${confirmReverter.totais.removidos} removidas` : null,
+                      confirmReverter.totais?.restaurados ? `${confirmReverter.totais.restaurados} restauradas` : null,
+                    ].filter(Boolean).join(" · ") || "sem mudanças registradas"}
+                  </div>
+                )}
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                  Esta ação desfaz as mudanças aplicadas por esta revisão: itens criados serão removidos do cronograma, e datas, % e custos voltarão aos valores anteriores. Não é reversível.
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!revertendoId}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!!revertendoId}
+              onClick={(e) => { e.preventDefault(); if (confirmReverter) reverterRevisao(confirmReverter); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {revertendoId ? "Revertendo…" : "Reverter revisão"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

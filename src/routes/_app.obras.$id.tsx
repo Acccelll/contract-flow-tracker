@@ -21,6 +21,8 @@ import { brl, calcularVencimento } from "@/lib/billing";
 import { addDays, format, parseISO, differenceInCalendarDays } from "date-fns";
 import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/mpp";
 import { Switch } from "@/components/ui/switch";
+import { AditivosTab } from "@/components/obra/AditivosTab";
+import { HistoricoTab } from "@/components/obra/HistoricoTab";
 
 export const Route = createFileRoute("/_app/obras/$id")({ component: ObraDetail });
 

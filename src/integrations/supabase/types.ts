@@ -114,6 +114,7 @@ export type Database = {
           ativo: boolean
           created_at: string
           custo: number
+          custo_baseline: number | null
           data_fim: string
           data_fim_baseline: string | null
           data_inicio: string
@@ -130,6 +131,7 @@ export type Database = {
           ativo?: boolean
           created_at?: string
           custo?: number
+          custo_baseline?: number | null
           data_fim: string
           data_fim_baseline?: string | null
           data_inicio: string
@@ -146,6 +148,7 @@ export type Database = {
           ativo?: boolean
           created_at?: string
           custo?: number
+          custo_baseline?: number | null
           data_fim?: string
           data_fim_baseline?: string | null
           data_inicio?: string

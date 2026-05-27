@@ -18,7 +18,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { brl, calcularVencimento } from "@/lib/billing";
-import { addDays, format, parseISO } from "date-fns";
+import { addDays, format, parseISO, differenceInCalendarDays } from "date-fns";
+import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/mpp";
+import { Switch } from "@/components/ui/switch";
 
 export const Route = createFileRoute("/_app/obras/$id")({ component: ObraDetail });
 

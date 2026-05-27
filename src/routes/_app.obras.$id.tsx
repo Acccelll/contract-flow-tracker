@@ -2168,3 +2168,134 @@ function LimparImportadosButton({
     </Dialog>
   );
 }
+
+function RevisaoDetalhes({ revisaoId }: { revisaoId: string }) {
+  const [filtro, setFiltro] = useState("");
+  const [tipo, setTipo] = useState<string>("todos");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["revisao_detalhes", revisaoId],
+    queryFn: async () =>
+      (
+        await supabase
+          .from("cronograma_item_revisoes")
+          .select(
+            "id, descricao_item, tipo_mudanca, data_inicio_anterior, data_inicio_novo, data_fim_anterior, data_fim_novo, percentual_realizado_anterior, percentual_realizado_novo, custo_anterior, custo_novo",
+          )
+          .eq("revisao_id", revisaoId)
+      ).data ?? [],
+  });
+
+  if (isLoading) {
+    return <div className="px-4 py-3 text-xs text-muted-foreground">Carregando mudanças…</div>;
+  }
+  if (!data || data.length === 0) {
+    return <div className="px-4 py-3 text-xs text-muted-foreground">Nenhuma mudança registrada nesta revisão.</div>;
+  }
+
+  const tipos = Array.from(new Set(data.map((d) => d.tipo_mudanca))).sort();
+  const filtradas = data
+    .filter((d) => tipo === "todos" || d.tipo_mudanca === tipo)
+    .filter((d) => !filtro || (d.descricao_item ?? "").toLowerCase().includes(filtro.toLowerCase()));
+
+  function fmtDate(s?: string | null) {
+    if (!s) return "—";
+    try { return format(parseISO(s), "dd/MM/yy"); } catch { return s; }
+  }
+  function deltaDias(antes?: string | null, depois?: string | null) {
+    if (!antes || !depois) return null;
+    try { return differenceInCalendarDays(parseISO(depois), parseISO(antes)); } catch { return null; }
+  }
+  function antesDepois(d: typeof data[number]) {
+    switch (d.tipo_mudanca) {
+      case "novo":
+        return { antes: "—", depois: `${fmtDate(d.data_inicio_novo)} → ${fmtDate(d.data_fim_novo)}` };
+      case "removido":
+        return { antes: "(ativo)", depois: "(inativo)" };
+      case "restaurado":
+        return { antes: "(inativo)", depois: "(ativo)" };
+      case "data": {
+        const d1 = deltaDias(d.data_fim_anterior, d.data_fim_novo);
+        return {
+          antes: `${fmtDate(d.data_inicio_anterior)} → ${fmtDate(d.data_fim_anterior)}`,
+          depois: `${fmtDate(d.data_inicio_novo)} → ${fmtDate(d.data_fim_novo)}`,
+          delta: d1,
+        };
+      }
+      case "pct":
+        return {
+          antes: `${Number(d.percentual_realizado_anterior ?? 0).toFixed(1)}%`,
+          depois: `${Number(d.percentual_realizado_novo ?? 0).toFixed(1)}%`,
+        };
+      case "custo":
+        return { antes: brl(Number(d.custo_anterior ?? 0)), depois: brl(Number(d.custo_novo ?? 0)) };
+      default:
+        return { antes: "—", depois: "—" };
+    }
+  }
+  const tipoCor: Record<string, string> = {
+    novo: "bg-blue-500/15 text-blue-700",
+    data: "bg-amber-500/15 text-amber-700",
+    pct: "bg-emerald-500/15 text-emerald-700",
+    custo: "bg-purple-500/15 text-purple-700",
+    removido: "bg-red-500/15 text-red-700",
+    restaurado: "bg-sky-500/15 text-sky-700",
+  };
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Buscar tarefa…"
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+          className="h-8 max-w-xs"
+        />
+        <Select value={tipo} onValueChange={setTipo}>
+          <SelectTrigger className="h-8 w-[180px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos os tipos</SelectItem>
+            {tipos.map((t) => (
+              <SelectItem key={t} value={t}>{t}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground ml-auto">{filtradas.length} de {data.length}</span>
+      </div>
+      <div className="rounded-md border bg-background overflow-hidden">
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="w-[110px]">Tipo</TableHead>
+            <TableHead>Tarefa</TableHead>
+            <TableHead>Antes</TableHead>
+            <TableHead>Depois</TableHead>
+            <TableHead className="text-right w-[80px]">Δ</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {filtradas.slice(0, 200).map((d) => {
+              const ad = antesDepois(d);
+              return (
+                <TableRow key={d.id}>
+                  <TableCell>
+                    <Badge className={(tipoCor[d.tipo_mudanca] ?? "bg-muted text-muted-foreground") + " border-none"}>{d.tipo_mudanca}</Badge>
+                  </TableCell>
+                  <TableCell className="max-w-[420px] truncate" title={d.descricao_item ?? ""}>{d.descricao_item ?? "—"}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap">{ad.antes}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap">{ad.depois}</TableCell>
+                  <TableCell className="text-right text-xs">
+                    {"delta" in ad && ad.delta != null && ad.delta !== 0 ? (
+                      <Badge variant={ad.delta > 0 ? "destructive" : "secondary"}>{ad.delta > 0 ? `+${ad.delta}` : ad.delta}d</Badge>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+        {filtradas.length > 200 && (
+          <div className="px-3 py-2 text-xs text-muted-foreground">Mostrando 200 de {filtradas.length}. Use a busca para refinar.</div>
+        )}
+      </div>
+    </div>
+  );
+}

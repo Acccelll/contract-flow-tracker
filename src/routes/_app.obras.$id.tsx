@@ -93,10 +93,11 @@ function ObraDetail() {
             obraId={id}
             temMedicoes={(medicoes ?? []).length > 0}
             temNfs={(nfs ?? []).length > 0}
-            temRecebimentos={(receb ?? []).length > 0}
+            temRecebimentos={(receb ?? []).some((r: any) => r.data_recebimento)}
             onDone={() => {
               qc.invalidateQueries({ queryKey: ["crono", id] });
               qc.invalidateQueries({ queryKey: ["revisoes", id] });
+              qc.invalidateQueries({ queryKey: ["receb", id] });
               qc.invalidateQueries({ queryKey: ["obra_valores", id] });
             }}
           />
@@ -1828,7 +1829,14 @@ function LimparImportadosButton({
     if (!podeExecutar) return;
     setLoading(true);
     try {
-      // 1) Revisões: itens primeiro, depois cabeçalhos
+      // 1) Previsões de recebimento (não efetivadas) — são derivadas do cronograma
+      await supabase
+        .from("recebimentos")
+        .delete()
+        .eq("obra_id", obraId)
+        .is("data_recebimento", null);
+
+      // 2) Revisões: itens primeiro, depois cabeçalhos
       const { data: revs } = await supabase
         .from("cronograma_revisoes").select("id").eq("obra_id", obraId);
       const revIds = (revs ?? []).map((r) => r.id);
@@ -1837,7 +1845,7 @@ function LimparImportadosButton({
         await supabase.from("cronograma_revisoes").delete().in("id", revIds);
       }
 
-      // 2) Baselines de cronograma: itens primeiro, depois cabeçalhos
+      // 3) Baselines de cronograma: itens primeiro, depois cabeçalhos
       const { data: bls } = await supabase
         .from("cronograma_baselines").select("id").eq("obra_id", obraId);
       const blIds = (bls ?? []).map((b) => b.id);
@@ -1846,7 +1854,7 @@ function LimparImportadosButton({
         await supabase.from("cronograma_baselines").delete().in("id", blIds);
       }
 
-      // 3) Dependências e itens do cronograma
+      // 4) Dependências e itens do cronograma
       await supabase.from("cronograma_dependencias").delete().eq("obra_id", obraId);
       const { error: errItens } = await supabase
         .from("cronograma_itens").delete().eq("obra_id", obraId);
@@ -1887,28 +1895,30 @@ function LimparImportadosButton({
               <li>Todos os itens do cronograma (incluindo baseline e CPM)</li>
               <li>Todas as revisões importadas e seu histórico de mudanças</li>
               <li>Baselines congelados e dependências entre tarefas</li>
+              <li>Previsões de recebimento ainda não efetivadas</li>
             </ul>
           </div>
 
           <div className="rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
             <p className="font-medium text-foreground">Não serão alterados:</p>
-            <p>Contrato, aditivos, medições, notas fiscais, recebimentos e logs de auditoria.</p>
+            <p>Contrato, aditivos, medições, notas fiscais, recebimentos já efetivados e logs de auditoria.</p>
           </div>
 
           {bloqueado && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
               <p className="font-medium">Limpeza bloqueada</p>
               <p className="mt-1">
-                Existem registros vinculados ao cronograma desta obra:
+                Existem registros financeiros desta obra que impedem a limpeza:
                 {temMedicoes && <span className="block">• medições</span>}
                 {temNfs && <span className="block">• notas fiscais</span>}
-                {temRecebimentos && <span className="block">• recebimentos</span>}
+                {temRecebimentos && <span className="block">• recebimentos já efetivados</span>}
               </p>
               <p className="mt-1">
                 Cancele/remova esses registros antes para evitar referências órfãs.
               </p>
             </div>
           )}
+
 
           <div>
             <Label htmlFor="confirm-limpar" className="text-xs">

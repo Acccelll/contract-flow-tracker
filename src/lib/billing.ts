@@ -41,6 +41,7 @@ export function redistribuirSaldo(
 /**
  * Calcula data de vencimento considerando DDL + dia fixo de pagamento do cliente.
  * Ex.: emissão 03/05, 30 DDL, dia fixo 15 → 02/06 → próximo dia 15 = 15/06.
+ * Quando o dia fixo não existe no mês (ex.: 31/fev), cai para o último dia do mês.
  */
 export function calcularVencimento(
   dataEmissao: Date,
@@ -50,12 +51,12 @@ export function calcularVencimento(
   const base = addDays(dataEmissao, prazoDDL);
   if (!diaFixo) return base;
   const d = new Date(base);
-  if (d.getDate() <= diaFixo) {
-    d.setDate(diaFixo);
-  } else {
+  if (d.getDate() > diaFixo) {
     d.setMonth(d.getMonth() + 1);
-    d.setDate(diaFixo);
   }
+  // Aplica clamp: usa min(diaFixo, ultimoDiaDoMes) para evitar overflow (31/fev → mar).
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(diaFixo, lastDay));
   return d;
 }
 

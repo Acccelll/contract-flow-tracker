@@ -281,6 +281,7 @@ type MppTask = {
   parentUid?: string;
   hasChildren: boolean;
   custo: number;
+  percentComplete?: number;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
@@ -311,6 +312,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isMilestone: get("Milestone") === "1",
       hasChildren: false,
       custo: isFinite(custo) ? custo : 0,
+      percentComplete: Number(get("PercentComplete") ?? "0") || 0,
     };
   }).filter((t) => t.outlineLevel > 0 && t.name);
 
@@ -329,6 +331,60 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
   return { titulo, tasks: raw };
 }
 
+type MppReport = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  stats: {
+    tarefasLidas: number;
+    folhas: number;
+    custoTotal: number;
+    percentualMedio: number;
+  };
+};
+
+function validateMpp(tasks: MppTask[], valorContrato?: number | null): MppReport {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const folhas = tasks.filter((t) => !t.hasChildren);
+  const folhasComData = folhas.filter((t) => t.start && t.finish);
+  const custoTotal = folhas.reduce((a, t) => a + (t.custo || 0), 0);
+  const pctMedio = folhas.length
+    ? folhas.reduce((a, t) => a + ((t as any).percentComplete || 0), 0) / folhas.length
+    : 0;
+
+  if (tasks.length === 0) errors.push("Nenhuma tarefa encontrada no XML.");
+  if (folhas.length === 0) errors.push("Nenhuma tarefa-folha (executável) detectada.");
+  if (folhas.length > 0 && custoTotal === 0)
+    warnings.push("Custo total das folhas é zero — verifique se o XML traz <Cost> ou <FixedCost>.");
+  if (folhasComData.length < folhas.length)
+    warnings.push(`${folhas.length - folhasComData.length} folha(s) sem datas serão ignoradas.`);
+  const semUid = tasks.filter((t) => !t.uid).length;
+  if (semUid > 0) errors.push(`${semUid} tarefa(s) sem UID — XML inconsistente.`);
+
+  // Heurística "Cost remanescente": se há avanço médio significativo e custo total é baixo
+  // relativo ao contrato, MS Project pode estar exportando custo remanescente, não total.
+  if (valorContrato && valorContrato > 0 && pctMedio > 5 && custoTotal < 0.9 * Number(valorContrato)) {
+    warnings.push(
+      `Custo total (${custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) é menor que 90% do contrato e há avanço médio de ${pctMedio.toFixed(1)}%. ` +
+      "Possível custo remanescente — MS Project exporta <Cost> como remanescente quando há % concluído. Confirme antes de importar.",
+    );
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    stats: {
+      tarefasLidas: tasks.length,
+      folhas: folhas.length,
+      custoTotal,
+      percentualMedio: pctMedio,
+    },
+  };
+}
+
+
 function CronogramaImporter() {
   const [tasks, setTasks] = useState<MppTask[]>([]);
   const [titulo, setTitulo] = useState<string>("");
@@ -339,6 +395,7 @@ function CronogramaImporter() {
   const [substituir, setSubstituir] = useState<boolean>(true);
   const [ponderacao, setPonderacao] = useState<"custo" | "dias">("custo");
   const [done, setDone] = useState<number | null>(null);
+  const [report, setReport] = useState<MppReport | null>(null);
 
 
   const { data: obras } = useQuery({
@@ -379,6 +436,8 @@ function CronogramaImporter() {
       try {
         const text = String(ev.target?.result ?? "");
         const { titulo, tasks } = parseMppXml(text);
+        const rep = validateMpp(tasks, valorContrato);
+        setReport(rep);
         setTitulo(titulo ?? "");
         setTasks(tasks);
         // pré-seleciona folhas (incluindo marcos de 0 dias — preserva ART etc.)
@@ -386,9 +445,12 @@ function CronogramaImporter() {
         tasks.forEach((t) => { if (!t.hasChildren) initSel[t.uid] = true; });
         setSelected(initSel);
         setCollapsed(new Set());
-        toast.success(`${tasks.length} tarefas detectadas`);
+        if (rep.errors.length) toast.error(`XML com ${rep.errors.length} erro(s) — veja painel`);
+        else if (rep.warnings.length) toast.warning(`${tasks.length} tarefas, ${rep.warnings.length} aviso(s)`);
+        else toast.success(`${tasks.length} tarefas detectadas (${rep.stats.folhas} folhas)`);
       } catch (err: any) {
         toast.error(`Erro ao ler XML: ${err.message}`);
+        setReport({ ok: false, errors: [String(err.message)], warnings: [], stats: { tarefasLidas: 0, folhas: 0, custoTotal: 0, percentualMedio: 0 } });
       }
     };
     reader.readAsText(file);
@@ -595,6 +657,47 @@ function CronogramaImporter() {
         </CardContent>
       </Card>
 
+      {report && (
+        <Card>
+          <CardContent className="pt-6 space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">Tarefas lidas</div>
+                <div className="font-semibold">{report.stats.tarefasLidas}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">Folhas</div>
+                <div className="font-semibold">{report.stats.folhas}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">Custo total</div>
+                <div className="font-semibold">{brl(report.stats.custoTotal)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">% médio</div>
+                <div className="font-semibold">{report.stats.percentualMedio.toFixed(1)}%</div>
+              </div>
+            </div>
+            {report.errors.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1">
+                <div className="text-sm font-medium text-destructive">Erros bloqueantes</div>
+                <ul className="text-xs list-disc pl-5 text-destructive">
+                  {report.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+            {report.warnings.length > 0 && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 space-y-1">
+                <div className="text-sm font-medium text-amber-700 dark:text-amber-400">Avisos</div>
+                <ul className="text-xs list-disc pl-5 text-amber-700 dark:text-amber-400">
+                  {report.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {tasks.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
@@ -634,7 +737,7 @@ function CronogramaImporter() {
               <Button variant="outline" size="sm" onClick={() => setSelected({})}>Limpar</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set(tasks.filter((t) => t.hasChildren).map((t) => t.uid)))}>Recolher tudo</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set())}>Expandir tudo</Button>
-              <Button onClick={importar} disabled={importing || !obraId}>
+              <Button onClick={importar} disabled={importing || !obraId || (report ? !report.ok : false)}>
                 <Upload className="h-4 w-4 mr-2" />{importing ? "Importando…" : "Importar cronograma"}
               </Button>
             </div>

@@ -1557,6 +1557,12 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
       }
 
       toast.success(`Revisão #${ultimoNumero + 1} registrada`);
+      if (novos.length > 0) {
+        toast.warning(
+          `${novos.length} item(ns) novo(s) adicionado(s) à baseline. Mudanças contratuais devem ser registradas como aditivo (aba Aditivos). Alteração registrada no histórico.`,
+          { duration: 8000 },
+        );
+      }
       setOpen(false);
       setDiffs(null);
       setArquivoNome("");

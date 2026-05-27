@@ -58,7 +58,7 @@ export function AditivosTab({ obraId }: { obraId: string }) {
   async function alterarStatus(id: string, novoStatus: string, versao: number) {
     const { error } = await supabase
       .from("aditivos_contrato")
-      .update({ status: novoStatus, data_aprovacao: novoStatus === "aprovado" ? new Date().toISOString().slice(0, 10) : null })
+      .update({ status: novoStatus as any, data_aprovacao: novoStatus === "aprovado" ? new Date().toISOString().slice(0, 10) : null })
       .eq("id", id)
       .eq("versao_otimista", versao);
     if (error) return toast.error(error.message);

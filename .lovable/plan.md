@@ -1,117 +1,121 @@
-## Objetivo
+# Plano de evolução — Previsão CS
 
-Permitir, dentro da página da obra, subir o XML do MS Project toda semana para:
-1. Atualizar **datas** das tarefas existentes (e detectar atrasos).
-2. Atualizar **% realizado** a partir do `PercentComplete` do Project (sem perder o lançamento manual via medições).
-3. **Registrar histórico** de cada revisão (snapshot completo) para auditoria e relatório de atraso.
-4. Detectar tarefas **novas** (incluídas no Project) e tarefas **removidas/inativas**.
+Atacar 4 frentes em ondas, cada uma fechando antes da próxima. Tudo respeita RLS por `owner_id` e usa transações SQL onde houver risco de concorrência.
 
-## Decisão de formato
+## Onda 1 — Riscos críticos (governança financeira)
 
-Mantemos **somente XML do MS Project**. `.mpp` é binário e exige bibliotecas Java (mpxj) que não rodam no runtime do Worker. A tela vai instruir explicitamente: *"No Project → Salvar como → XML"*. O importador semanal aceita só `.xml`.
+### 1.1 Validação de percentuais
+- CHECK `0 <= percentual_realizado <= 100` em `cronograma_itens` e `itens_medicao.percentual_atual`.
+- Trigger em `itens_medicao` validando, por `cronograma_item_id`:
+  - `SUM(percentual_atual) <= 100` considerando todas as medições aprovadas + a corrente.
+  - `SUM(valor_atual) <= custo_baseline_vigente`.
+- Trigger em `medicoes` validando soma total ≤ `valor_contrato + Σ aditivos` (ver Onda 3).
 
-## Identificação de tarefas
+### 1.2 Versionamento de baseline (opção A)
+- Nova tabela `cronograma_baselines` (snapshot por obra):
+  - `obra_id`, `versao` (int sequencial), `motivo` (`import_inicial` | `aditivo` | `ajuste_manual`), `created_at`, `created_by`.
+- Nova tabela `cronograma_item_baseline` (linhas do snapshot):
+  - `baseline_id`, `cronograma_item_id`, `uid_mpp`, `custo`, `data_inicio`, `data_fim`, `percentual_previsto`.
+- `medicoes` ganha `baseline_id` (FK) — cada medição fica congelada na versão vigente no momento da aprovação.
+- `cronograma_itens.custo_baseline` deixa de ser fonte única; passa a ser cache do snapshot vigente.
+- Nova baseline só pode ser criada por evento explícito (aditivo aprovado, ajuste manual autorizado). Importação de XML **nunca** cria baseline nova.
 
-Casamento por **UID do MS Project**. Vamos adicionar `uid_mpp` em `cronograma_itens` e, no primeiro import semanal de uma obra cujo cronograma já existe, fazemos um **backfill por WBS+nome** (one-shot) para preencher os UIDs das tarefas existentes. A partir daí, todo casamento é por UID.
+### 1.3 XML não altera custo
+- No fluxo de importação (`src/lib/mpp.ts` + `_app.importar.tsx` + `_app.obras.$id.tsx`):
+  - Itens existentes: atualizar apenas `data_inicio`, `data_fim`, `percentual_realizado`, `descricao`, `ordem`, `ativo`.
+  - **Nunca** sobrescrever `custo` nem `custo_baseline`.
+  - Itens novos (UID inexistente): inserir com `custo = custo_baseline` da baseline vigente apenas se houver; caso contrário, custo = 0 e sinalizar como "fora de baseline" para revisão.
+- Diff de revisão (`cronograma_item_revisoes`) deixa de gravar `custo_anterior`/`custo_novo` para itens existentes (passa a registrar apenas se houver criação de item).
 
-## Mudanças de banco (migration)
+### 1.4 Auditoria genérica
+- Nova tabela `audit_logs`:
+  - `id`, `obra_id` (nullable), `entidade` (text), `entidade_id` (uuid), `acao` (`insert`|`update`|`delete`|`approve`|`cancel`), `before` (jsonb), `after` (jsonb), `user_id`, `created_at`.
+- Triggers `AFTER INSERT/UPDATE/DELETE` em: `medicoes`, `itens_medicao`, `notas_fiscais`, `recebimentos`, `cronograma_baselines`, `aditivos_contrato` (Onda 3).
+- RLS: leitura restrita ao `owner_id` da obra.
+- UI mínima: aba "Histórico" na obra lista entradas com filtro por entidade.
 
-```sql
--- Casamento estável com o Project
-ALTER TABLE public.cronograma_itens
-  ADD COLUMN uid_mpp TEXT,
-  ADD COLUMN data_inicio_baseline DATE,  -- congelado no 1º import
-  ADD COLUMN data_fim_baseline DATE,
-  ADD COLUMN ativo BOOLEAN NOT NULL DEFAULT true;  -- false quando some do Project
-CREATE INDEX idx_cronograma_itens_obra_uid ON public.cronograma_itens(obra_id, uid_mpp);
+### 1.5 Concorrência
+- Adicionar coluna `versao_otimista` (int, default 1) em `medicoes`, `notas_fiscais`, `recebimentos`, `cronograma_itens`.
+- Trigger `BEFORE UPDATE` incrementa `versao_otimista`; mutações via `createServerFn` recebem `versao_otimista` esperada e fazem `UPDATE ... WHERE id = $1 AND versao_otimista = $2` — 0 linhas afetadas → erro `409 Conflict` tratado no UI.
+- Todas as operações de medição/revisão envolvendo múltiplas tabelas migram para server functions com `BEGIN ... COMMIT` explícito.
+- Importação de XML usa lock advisory por `obra_id` (`pg_advisory_xact_lock(hashtext(obra_id::text))`) durante a transação para evitar dois imports simultâneos.
 
--- Cabeçalho de cada revisão semanal
-CREATE TABLE public.cronograma_revisoes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  obra_id UUID NOT NULL,
-  numero INTEGER NOT NULL,              -- sequencial por obra (1,2,3…)
-  data_corte DATE NOT NULL,              -- escolhida pelo usuário no upload
-  arquivo_nome TEXT,
-  observacoes TEXT,
-  totais JSONB NOT NULL,                 -- {itens_total, novos, alterados_data, alterados_pct, removidos, custo_total}
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (obra_id, numero)
-);
+## Onda 2 — Workflows e status
 
--- Snapshot por item, só para itens que mudaram (ou todos no primeiro import)
-CREATE TABLE public.cronograma_item_revisoes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  revisao_id UUID NOT NULL REFERENCES public.cronograma_revisoes(id) ON DELETE CASCADE,
-  cronograma_item_id UUID NOT NULL,
-  data_inicio_anterior DATE, data_inicio_novo DATE,
-  data_fim_anterior DATE,    data_fim_novo DATE,
-  percentual_realizado_anterior NUMERIC(7,4),
-  percentual_realizado_novo NUMERIC(7,4),
-  custo_anterior NUMERIC(14,2), custo_novo NUMERIC(14,2),
-  tipo_mudanca TEXT NOT NULL  -- 'novo' | 'data' | 'pct' | 'custo' | 'removido' | 'restaurado'
-);
-```
+### 2.1 Estados
+- `medicoes.status` (enum existente) expandir para: `draft`, `em_revisao`, `aprovada`, `faturada`, `cancelada`.
+- `notas_fiscais.status` (novo): `draft`, `emitida`, `enviada`, `aprovada_cliente`, `recebida`, `cancelada`.
+- `recebimentos.status` (existente) expandir: `previsto`, `parcial`, `recebido`, `inadimplente`, `cancelado`.
+- Transições válidas codificadas em função `public.pode_transicionar(entidade, de, para)` + trigger.
 
-GRANTs + RLS (`authenticated` via join na `obras`/`cronograma_itens` por `owner_id`).
+### 2.2 Recebimentos parciais (N por NF)
+- Manter `recebimentos.nota_fiscal_id`; permitir N registros por NF.
+- `notas_fiscais` ganha view `vw_nf_saldo` com `valor_liquido - SUM(recebimentos.valor_recebido)`.
+- UI: cada NF lista seus recebimentos; ao registrar pagamento parcial, status da NF vira `recebida` somente quando saldo = 0.
 
-## UX dentro da obra
+### 2.3 UI
+- Botões de transição respeitam estado atual.
+- Itens em `aprovada`/`faturada` ficam read-only (sem editar % nem valor).
 
-Nova aba **"Revisões"** em `_app.obras.$id.tsx` (ao lado de Cronograma/Medições/NFs):
+## Onda 3 — Aditivos e separação contrato/baseline
 
-1. Botão **"Importar revisão semanal"** abre um `Sheet` com:
-   - Upload do `.xml`.
-   - Campo **Data de corte** (default: hoje).
-   - Preview da diff: tabela com colunas *Tarefa · Mudança · Antes → Depois*, agrupada por tipo (Novos, Datas alteradas, % alterado, Removidos). Cada linha tem checkbox para opt-out.
-   - Toggle **"Atualizar % realizado pelo PercentComplete"** (ligado por padrão — confirma a opção "Ambos" sem forçar).
-   - Botão **Confirmar revisão**.
+### 3.1 Modelo
+- Nova tabela `aditivos_contrato`:
+  - `obra_id`, `numero`, `tipo` (`acrescimo`|`supressao`|`reajuste`|`prazo`), `valor_financeiro` (numeric, pode ser negativo), `dias_prazo` (int), `data_aprovacao`, `documento_url`, `observacoes`, `status` (`rascunho`|`aprovado`|`cancelado`).
+- Aprovar aditivo financeiro com itens novos → cria nova `cronograma_baselines` (versão N+1) contendo os itens originais + novos.
 
-2. Lista de revisões anteriores (número, data de corte, totais resumidos). Clicar abre o detalhe da revisão (mesma diff em modo somente leitura). Permite **gerar PDF/CSV** simples de atraso.
+### 3.2 Campos derivados de obra
+- `obras.valor_contrato` permanece (valor original).
+- View `vw_obra_valores`:
+  - `valor_contrato_atual = valor_contrato + Σ aditivos aprovados`.
+  - `valor_planejado_baseline = Σ custo da baseline vigente`.
+  - `valor_executado = Σ itens_medicao.valor_atual em medições aprovadas`.
+- `% planejado` da obra usa `valor_planejado_baseline` como denominador (não mais `valor_contrato` cru).
 
-3. Na aba Cronograma já existente, adicionar coluna **"Δ dias fim"** (data_fim atual − baseline) com badge vermelho quando > 0, para visualizar atraso direto na hierarquia.
+## Onda 4 — Performance e UX
 
-## Lógica do import (server function `importarRevisaoCronograma`)
+### 4.1 Banco
+- Índices: `cronograma_itens(obra_id, ativo)`, `cronograma_itens(uid_mpp)`, `cronograma_itens(data_fim)`, `itens_medicao(cronograma_item_id)`, `itens_medicao(medicao_id)`, `recebimentos(obra_id, data_prevista)`, `audit_logs(entidade, entidade_id)`.
+- Materialized view `mv_obra_kpis` com agregações (avanço físico, financeiro, atraso médio) — refresh em trigger por mutação relevante ou a cada 5min.
 
-Roda como server fn autenticada (`requireSupabaseAuth`) — o parsing do XML é feito no cliente (mesmo `parseMppXml` atual) e enviado já normalizado em JSON ao servidor para a transação ser atômica.
+### 4.2 UI da obra
+- Tabs reorganizadas: **Resumo · Cronograma · Revisões · Medições · Faturamento · Recebimentos · Aditivos · Histórico**.
+- Cronograma:
+  - Virtualização (`@tanstack/react-virtual`) — preparar para 5k+ linhas.
+  - Colapso de árvore por nível (usar `outline_number`/`ordem`).
+  - Filtros: atrasados, em andamento, concluídos, fora de baseline.
+  - Destaque visual: linha vermelha quando `data_fim > data_fim_baseline`.
 
-Passos:
-1. Carrega `cronograma_itens` ativos da obra. Se algum não tem `uid_mpp`, executa backfill por `wbs+nome` contra as tarefas do XML.
-2. Compara tarefa a tarefa (somente folhas, mesma regra do importador atual):
-   - **Novo**: existe no XML, não tem item correspondente → `INSERT` em `cronograma_itens` com `uid_mpp`, datas, custo, `percentual_previsto`, `data_inicio_baseline = data_inicio`, `data_fim_baseline = data_fim`.
-   - **Removido**: existe no banco, sumiu do XML → `UPDATE ativo = false` (não apaga; preserva medições e NFs já vinculadas).
-   - **Restaurado**: tarefa inativa voltou a aparecer → `ativo = true`.
-   - **Alterado**: comparar `data_inicio`, `data_fim`, `custo`, `PercentComplete`. Onde mudou, gravar `cronograma_item_revisoes` com antes/depois e aplicar update.
-3. Quando `data_inicio_baseline` ainda é NULL (itens importados antes desta feature), preencher com o valor atual no primeiro import — isso vira o baseline para cálculo de atraso.
-4. Atualizar `percentual_realizado` somente se o toggle estiver ligado **e** o valor do XML for ≥ ao valor atual (evita sobrescrever um lançamento manual maior que o Project ainda não enxergou). Quando há divergência, registrar como `tipo_mudanca = 'pct'`.
-5. Recalcular `percentual_previsto` proporcional ao custo (mesma fórmula do importador atual) sobre o conjunto ativo.
-6. `INSERT` em `cronograma_revisoes` com `numero = max+1` e os totais.
-7. Disparar `recalcularPrevisaoNF(obraId)` (já existe) para atualizar previsão de recebimentos.
+### 4.3 Dashboard executivo (mínimo viável)
+- Curva S (planejado x executado por mês).
+- Aging de recebimentos.
+- Ranking de obras por SPI = avanço real / avanço planejado.
 
-Tudo em uma transação lógica (sequência de calls; em caso de erro, abortar e mostrar toast — não rollback automático, então a ordem é: criar `cronograma_revisoes` por último, depois das mutações dos itens, para que um cabeçalho só exista se as alterações foram aplicadas).
+---
 
-## Atrasos & relatório
+## Ordem de execução sugerida
 
-- **Atraso por item** = `data_fim_atual − data_fim_baseline` (em dias úteis seria ideal, mas dias corridos basta para v1).
-- **Atraso do projeto** = max(data_fim) atual − max(data_fim_baseline).
-- Card na aba Revisões: "Atraso acumulado: X dias · Y tarefas atrasadas".
-- CSV exportável da última revisão (Tarefa, Início baseline, Início atual, Fim baseline, Fim atual, Δ dias, % previsto, % real).
+1. **Onda 1.4 (auditoria)** primeiro — começa a registrar tudo antes das próximas mudanças.
+2. **Onda 1.1 + 1.3 + 1.5** — validações, XML defensivo, concorrência otimista.
+3. **Onda 1.2 (baseline versionado)** — migração de dados existentes: cria baseline v1 a partir do `custo_baseline` atual e amarra medições existentes à v1.
+4. **Onda 2** — workflows e recebimentos parciais.
+5. **Onda 3** — aditivos + views de valores.
+6. **Onda 4** — índices, virtualização, tabs, dashboard.
 
-## Compatibilidade
+## Detalhes técnicos relevantes
 
-- O importador **inicial** (página `/importar`) continua igual — é o ponto de entrada quando ainda não há cronograma. A primeira importação ali já preenche `uid_mpp` e `data_*_baseline`.
-- Reimportar pela tela `/importar` com "Substituir cronograma" continua funcionando, mas a aba Revisões na obra passa a ser a via recomendada para updates semanais (preserva histórico, medições e NFs).
-- Medições continuam sendo a fonte oficial de faturamento; o `percentual_realizado` atualizado pelo XML é informativo/auxiliar — a barra de progresso já existente passa a refletir o mais recente.
+- Todas as mutações multi-tabela migram para `createServerFn` em `src/lib/*.functions.ts` com `requireSupabaseAuth`; transações SQL via `BEGIN/COMMIT` dentro do handler.
+- `audit_logs.user_id` preenchido por `auth.uid()` na trigger (`SECURITY DEFINER` + `SET search_path = public`).
+- Migração de dados (passo 3) é destrutiva-ish — backup antes via `pg_dump` lógico das tabelas afetadas (instrução manual ao usuário, fora do escopo de código).
+- Todos os novos enums em PostgreSQL (`CREATE TYPE`).
+- Cada tabela nova: `GRANT SELECT, INSERT, UPDATE, DELETE ... TO authenticated` + `GRANT ALL ... TO service_role` + RLS por `owner_id` da obra (via EXISTS join, padrão atual do projeto).
 
-## Fora de escopo (v1)
+## Fora deste plano (registrar como roadmap futuro)
+- OCR de NF, antivírus em uploads, hash SHA256 (Onda de segurança dedicada).
+- Centro de custos / categorias / fornecedores (refatoração de domínio).
+- BI completo (SPI/CPI por item, previsão de caixa probabilística).
+- SAML/SSO, multi-tenant por organização.
 
-- Conversão `.mpp → xml` no servidor.
-- Edição manual de tarefas pela tela Revisões (apenas diff readonly).
-- Notificações por e-mail de atraso.
-- Comparar duas revisões arbitrárias (a v1 sempre compara a nova com o estado atual; o histórico fica navegável mas não é "diff entre revisão 3 e 5").
+---
 
-## Arquivos afetados
-
-- `supabase/migrations/<novo>.sql` — schema acima.
-- `src/lib/cronograma-revisao.functions.ts` — server fn `importarRevisaoCronograma`.
-- `src/routes/_app.obras.$id.tsx` — nova aba Revisões + coluna Δ no cronograma.
-- `src/lib/mpp.ts` (novo) — extrair `parseMppXml` do importador para reuso (também usado pela tela da obra).
-- `src/routes/_app.importar.tsx` — passa a importar o `parseMppXml` do módulo compartilhado e a gravar `uid_mpp` + baseline no primeiro import.
+Quer que eu execute as 4 ondas em sequência (gerando migrations + código onda por onda, com pausa para você validar antes de cada uma) ou prefere fechar apenas a Onda 1 primeiro e reavaliar?

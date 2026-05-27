@@ -2075,6 +2075,48 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!confirmReverter} onOpenChange={(v) => !v && setConfirmReverter(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reverter revisão #{confirmReverter?.numero}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Data de corte:</span>{" "}
+                  {confirmReverter && format(parseISO(confirmReverter.data_corte), "dd/MM/yyyy")}
+                  {confirmReverter?.arquivo_nome ? <> · <span className="font-mono text-xs">{confirmReverter.arquivo_nome}</span></> : null}
+                </div>
+                {confirmReverter && (
+                  <div className="text-xs text-muted-foreground">
+                    {[
+                      confirmReverter.totais?.novos ? `+${confirmReverter.totais.novos} novas` : null,
+                      confirmReverter.totais?.alterados_data ? `${confirmReverter.totais.alterados_data} datas` : null,
+                      confirmReverter.totais?.alterados_pct ? `${confirmReverter.totais.alterados_pct} %` : null,
+                      confirmReverter.totais?.alterados_custo ? `${confirmReverter.totais.alterados_custo} custo` : null,
+                      confirmReverter.totais?.removidos ? `${confirmReverter.totais.removidos} removidas` : null,
+                      confirmReverter.totais?.restaurados ? `${confirmReverter.totais.restaurados} restauradas` : null,
+                    ].filter(Boolean).join(" · ") || "sem mudanças registradas"}
+                  </div>
+                )}
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                  Esta ação desfaz as mudanças aplicadas por esta revisão: itens criados serão removidos do cronograma, e datas, % e custos voltarão aos valores anteriores. Não é reversível.
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!revertendoId}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!!revertendoId}
+              onClick={(e) => { e.preventDefault(); if (confirmReverter) reverterRevisao(confirmReverter); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {revertendoId ? "Revertendo…" : "Reverter revisão"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

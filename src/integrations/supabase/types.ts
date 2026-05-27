@@ -175,6 +175,44 @@ export type Database = {
         }
         Relationships: []
       }
+      cronograma_dependencias: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          lag_dias: number
+          obra_id: string
+          predecessor_uid_mpp: string
+          tipo: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          lag_dias?: number
+          obra_id: string
+          predecessor_uid_mpp: string
+          tipo?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          lag_dias?: number
+          obra_id?: string
+          predecessor_uid_mpp?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cronograma_dependencias_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_itens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cronograma_item_baseline: {
         Row: {
           baseline_id: string
@@ -285,6 +323,7 @@ export type Database = {
         Row: {
           ativo: boolean
           created_at: string
+          critico: boolean
           custo: number
           custo_baseline: number | null
           data_fim: string
@@ -292,6 +331,7 @@ export type Database = {
           data_inicio: string
           data_inicio_baseline: string | null
           descricao: string | null
+          folga_dias: number | null
           id: string
           obra_id: string
           ordem: number
@@ -303,6 +343,7 @@ export type Database = {
         Insert: {
           ativo?: boolean
           created_at?: string
+          critico?: boolean
           custo?: number
           custo_baseline?: number | null
           data_fim: string
@@ -310,6 +351,7 @@ export type Database = {
           data_inicio: string
           data_inicio_baseline?: string | null
           descricao?: string | null
+          folga_dias?: number | null
           id?: string
           obra_id: string
           ordem?: number
@@ -321,6 +363,7 @@ export type Database = {
         Update: {
           ativo?: boolean
           created_at?: string
+          critico?: boolean
           custo?: number
           custo_baseline?: number | null
           data_fim?: string
@@ -328,6 +371,7 @@ export type Database = {
           data_inicio?: string
           data_inicio_baseline?: string | null
           descricao?: string | null
+          folga_dias?: number | null
           id?: string
           obra_id?: string
           ordem?: number

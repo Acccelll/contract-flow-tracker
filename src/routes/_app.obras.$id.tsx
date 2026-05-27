@@ -23,6 +23,7 @@ import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/
 import { Switch } from "@/components/ui/switch";
 import { AditivosTab } from "@/components/obra/AditivosTab";
 import { HistoricoTab } from "@/components/obra/HistoricoTab";
+import { CompararRevisoesTab } from "@/components/obra/CompararRevisoesTab";
 
 export const Route = createFileRoute("/_app/obras/$id")({ component: ObraDetail });
 
@@ -129,6 +130,7 @@ function ObraDetail() {
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
           <TabsTrigger value="aditivos">Aditivos</TabsTrigger>
           <TabsTrigger value="revisoes">Revisões</TabsTrigger>
+          <TabsTrigger value="comparar">Comparar</TabsTrigger>
           <TabsTrigger value="historico">Histórico</TabsTrigger>
         </TabsList>
 
@@ -163,6 +165,7 @@ function ObraDetail() {
             }}
           />
         </TabsContent>
+        <TabsContent value="comparar"><CompararRevisoesTab obraId={id} /></TabsContent>
         <TabsContent value="historico"><HistoricoTab obraId={id} /></TabsContent>
       </Tabs>
 
@@ -1450,6 +1453,31 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
             percentual_realizado_novo: row.percentual_realizado,
           });
         });
+      }
+
+      // G4.1: persistir dependências (predecessors) dos novos itens, se vieram no XML
+      if (novos.length) {
+        const { data: novosSalvos } = await supabase
+          .from("cronograma_itens")
+          .select("id, uid_mpp")
+          .eq("obra_id", obraId)
+          .in("uid_mpp", novos.map((d) => d.uid).filter(Boolean));
+        const byUid = new Map((novosSalvos ?? []).filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]));
+        const deps: any[] = [];
+        for (const d of novos) {
+          const itemId = byUid.get(String(d.uid));
+          if (!itemId || !d.task) continue;
+          for (const p of d.task.predecessors ?? []) {
+            deps.push({
+              obra_id: obraId,
+              item_id: itemId,
+              predecessor_uid_mpp: p.predecessorUid,
+              tipo: p.tipo,
+              lag_dias: p.lagDias,
+            });
+          }
+        }
+        if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
       }
 
       // 2) Updates por item existente

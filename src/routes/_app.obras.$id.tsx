@@ -1895,28 +1895,30 @@ function LimparImportadosButton({
               <li>Todos os itens do cronograma (incluindo baseline e CPM)</li>
               <li>Todas as revisões importadas e seu histórico de mudanças</li>
               <li>Baselines congelados e dependências entre tarefas</li>
+              <li>Previsões de recebimento ainda não efetivadas</li>
             </ul>
           </div>
 
           <div className="rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
             <p className="font-medium text-foreground">Não serão alterados:</p>
-            <p>Contrato, aditivos, medições, notas fiscais, recebimentos e logs de auditoria.</p>
+            <p>Contrato, aditivos, medições, notas fiscais, recebimentos já efetivados e logs de auditoria.</p>
           </div>
 
           {bloqueado && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
               <p className="font-medium">Limpeza bloqueada</p>
               <p className="mt-1">
-                Existem registros vinculados ao cronograma desta obra:
+                Existem registros financeiros desta obra que impedem a limpeza:
                 {temMedicoes && <span className="block">• medições</span>}
                 {temNfs && <span className="block">• notas fiscais</span>}
-                {temRecebimentos && <span className="block">• recebimentos</span>}
+                {temRecebimentos && <span className="block">• recebimentos já efetivados</span>}
               </p>
               <p className="mt-1">
                 Cancele/remova esses registros antes para evitar referências órfãs.
               </p>
             </div>
           )}
+
 
           <div>
             <Label htmlFor="confirm-limpar" className="text-xs">

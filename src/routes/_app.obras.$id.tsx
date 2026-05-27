@@ -88,8 +88,16 @@ function ObraDetail() {
           <p className="text-sm text-muted-foreground">Cód. {obra.codigo} · {obra.clientes?.nome ?? "—"}</p>
         </div>
         <div className="text-right">
-          <div className="text-2xl font-semibold">{brl(obra.valor_contrato)}</div>
-          <div className="text-xs text-muted-foreground">Valor do contrato</div>
+          <div className="text-2xl font-semibold">{brl(valores?.valor_contrato_atual ?? obra.valor_contrato)}</div>
+          <div className="text-xs text-muted-foreground">
+            Contrato atual
+            {valores && Number(valores.valor_contrato_atual) !== Number(valores.valor_contrato_original) && (
+              <span className="ml-1">
+                (original {brl(valores.valor_contrato_original)} {Number(valores.valor_contrato_atual) > Number(valores.valor_contrato_original) ? "+" : ""}
+                {brl(Number(valores.valor_contrato_atual) - Number(valores.valor_contrato_original))} aditivos)
+              </span>
+            )}
+          </div>
         </div>
       </header>
 

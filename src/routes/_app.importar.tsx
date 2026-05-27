@@ -665,6 +665,7 @@ function CronogramaImporter() {
 
   return (
     <div className="space-y-4">
+      <MppNotSupportedDialog open={mppDialogOpen} onOpenChange={setMppDialogOpen} />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Cronograma (XML do MS Project)</CardTitle>
@@ -672,8 +673,13 @@ function CronogramaImporter() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Arquivo .xml</Label>
-              <Input type="file" accept=".xml" onChange={onFile} />
+              <div className="flex items-center justify-between">
+                <Label>Arquivo .xml</Label>
+                <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <HelpCircle className="h-3 w-3" /> Tem .mpp? Veja como converter
+                </button>
+              </div>
+              <Input type="file" accept=".xml,.mpp" onChange={onFile} />
             </div>
             <div className="space-y-1.5">
               <Label>Obra de destino</Label>

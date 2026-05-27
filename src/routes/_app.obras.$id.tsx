@@ -1803,3 +1803,140 @@ function formatAfter(d: DiffRow): string {
   if (d.tipo === "custo") return brl(d.custo_novo ?? 0);
   return "";
 }
+
+function LimparImportadosButton({
+  obraId,
+  temMedicoes,
+  temNfs,
+  temRecebimentos,
+  onDone,
+}: {
+  obraId: string;
+  temMedicoes: boolean;
+  temNfs: boolean;
+  temRecebimentos: boolean;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const bloqueado = temMedicoes || temNfs || temRecebimentos;
+  const podeExecutar = confirmText.trim().toUpperCase() === "LIMPAR" && !bloqueado;
+
+  async function limpar() {
+    if (!podeExecutar) return;
+    setLoading(true);
+    try {
+      // 1) Revisões: itens primeiro, depois cabeçalhos
+      const { data: revs } = await supabase
+        .from("cronograma_revisoes").select("id").eq("obra_id", obraId);
+      const revIds = (revs ?? []).map((r) => r.id);
+      if (revIds.length) {
+        await supabase.from("cronograma_item_revisoes").delete().in("revisao_id", revIds);
+        await supabase.from("cronograma_revisoes").delete().in("id", revIds);
+      }
+
+      // 2) Baselines de cronograma: itens primeiro, depois cabeçalhos
+      const { data: bls } = await supabase
+        .from("cronograma_baselines").select("id").eq("obra_id", obraId);
+      const blIds = (bls ?? []).map((b) => b.id);
+      if (blIds.length) {
+        await supabase.from("cronograma_item_baseline").delete().in("baseline_id", blIds);
+        await supabase.from("cronograma_baselines").delete().in("id", blIds);
+      }
+
+      // 3) Dependências e itens do cronograma
+      await supabase.from("cronograma_dependencias").delete().eq("obra_id", obraId);
+      const { error: errItens } = await supabase
+        .from("cronograma_itens").delete().eq("obra_id", obraId);
+      if (errItens) throw errItens;
+
+      toast.success("Dados importados removidos. Você pode reimportar o XML.");
+      setOpen(false);
+      setConfirmText("");
+      onDone();
+    } catch (e: any) {
+      toast.error("Falha ao limpar: " + (e?.message ?? "erro desconhecido"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setConfirmText(""); }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive">
+          <Trash2 className="h-4 w-4 mr-1" /> Limpar importados
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            Limpar dados importados de contrato e revisões
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-destructive">
+            <p className="font-medium">Esta ação é irreversível.</p>
+            <p className="mt-1">
+              Serão removidos permanentemente desta obra:
+            </p>
+            <ul className="list-disc ml-5 mt-1 space-y-0.5">
+              <li>Todos os itens do cronograma (incluindo baseline e CPM)</li>
+              <li>Todas as revisões importadas e seu histórico de mudanças</li>
+              <li>Baselines congelados e dependências entre tarefas</li>
+            </ul>
+          </div>
+
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
+            <p className="font-medium text-foreground">Não serão alterados:</p>
+            <p>Contrato, aditivos, medições, notas fiscais, recebimentos e logs de auditoria.</p>
+          </div>
+
+          {bloqueado && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
+              <p className="font-medium">Limpeza bloqueada</p>
+              <p className="mt-1">
+                Existem registros vinculados ao cronograma desta obra:
+                {temMedicoes && <span className="block">• medições</span>}
+                {temNfs && <span className="block">• notas fiscais</span>}
+                {temRecebimentos && <span className="block">• recebimentos</span>}
+              </p>
+              <p className="mt-1">
+                Cancele/remova esses registros antes para evitar referências órfãs.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <Label htmlFor="confirm-limpar" className="text-xs">
+              Para confirmar, digite <span className="font-mono font-semibold">LIMPAR</span>:
+            </Label>
+            <Input
+              id="confirm-limpar"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="LIMPAR"
+              disabled={bloqueado || loading}
+              className="mt-1"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={loading}>
+            Cancelar
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={limpar}
+            disabled={!podeExecutar || loading}
+          >
+            {loading ? "Limpando…" : "Limpar definitivamente"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -14,6 +14,65 @@ export type Database = {
   }
   public: {
     Tables: {
+      aditivos_contrato: {
+        Row: {
+          baseline_id: string | null
+          created_at: string
+          data_aprovacao: string | null
+          dias_prazo: number
+          documento_url: string | null
+          id: string
+          numero: string
+          obra_id: string
+          observacoes: string | null
+          status: Database["public"]["Enums"]["aditivo_status"]
+          tipo: Database["public"]["Enums"]["aditivo_tipo"]
+          updated_at: string
+          valor_financeiro: number
+          versao_otimista: number
+        }
+        Insert: {
+          baseline_id?: string | null
+          created_at?: string
+          data_aprovacao?: string | null
+          dias_prazo?: number
+          documento_url?: string | null
+          id?: string
+          numero: string
+          obra_id: string
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["aditivo_status"]
+          tipo: Database["public"]["Enums"]["aditivo_tipo"]
+          updated_at?: string
+          valor_financeiro?: number
+          versao_otimista?: number
+        }
+        Update: {
+          baseline_id?: string | null
+          created_at?: string
+          data_aprovacao?: string | null
+          dias_prazo?: number
+          documento_url?: string | null
+          id?: string
+          numero?: string
+          obra_id?: string
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["aditivo_status"]
+          tipo?: Database["public"]["Enums"]["aditivo_tipo"]
+          updated_at?: string
+          valor_financeiro?: number
+          versao_otimista?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aditivos_contrato_baseline_id_fkey"
+            columns: ["baseline_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_baselines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           acao: string
@@ -285,6 +344,13 @@ export type Database = {
             referencedRelation: "obras"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "cronograma_itens_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "vw_obra_valores"
+            referencedColumns: ["obra_id"]
+          },
         ]
       }
       cronograma_revisoes: {
@@ -432,6 +498,13 @@ export type Database = {
             referencedRelation: "obras"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "medicoes_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "vw_obra_valores"
+            referencedColumns: ["obra_id"]
+          },
         ]
       }
       notas_fiscais: {
@@ -521,6 +594,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "obras"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notas_fiscais_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "vw_obra_valores"
+            referencedColumns: ["obra_id"]
           },
         ]
       }
@@ -672,6 +752,13 @@ export type Database = {
             referencedRelation: "obras"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "recebimentos_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "vw_obra_valores"
+            referencedColumns: ["obra_id"]
+          },
         ]
       }
     }
@@ -693,13 +780,49 @@ export type Database = {
             referencedRelation: "obras"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "notas_fiscais_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "vw_obra_valores"
+            referencedColumns: ["obra_id"]
+          },
         ]
+      }
+      vw_obra_valores: {
+        Row: {
+          dias_aditivos: number | null
+          obra_id: string | null
+          valor_contrato_atual: number | null
+          valor_contrato_original: number | null
+          valor_executado: number | null
+          valor_planejado_baseline: number | null
+        }
+        Insert: {
+          dias_aditivos?: never
+          obra_id?: string | null
+          valor_contrato_atual?: never
+          valor_contrato_original?: number | null
+          valor_executado?: never
+          valor_planejado_baseline?: never
+        }
+        Update: {
+          dias_aditivos?: never
+          obra_id?: string | null
+          valor_contrato_atual?: never
+          valor_contrato_original?: number | null
+          valor_executado?: never
+          valor_planejado_baseline?: never
+        }
+        Relationships: []
       }
     }
     Functions: {
       [_ in never]: never
     }
     Enums: {
+      aditivo_status: "rascunho" | "aprovado" | "cancelado"
+      aditivo_tipo: "acrescimo" | "supressao" | "reajuste" | "prazo" | "misto"
       medicao_status:
         | "rascunho"
         | "enviada"
@@ -852,6 +975,8 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      aditivo_status: ["rascunho", "aprovado", "cancelado"],
+      aditivo_tipo: ["acrescimo", "supressao", "reajuste", "prazo", "misto"],
       medicao_status: [
         "rascunho",
         "enviada",

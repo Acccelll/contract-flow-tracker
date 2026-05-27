@@ -312,6 +312,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       isMilestone: get("Milestone") === "1",
       hasChildren: false,
       custo: isFinite(custo) ? custo : 0,
+      percentComplete: Number(get("PercentComplete") ?? "0") || 0,
     };
   }).filter((t) => t.outlineLevel > 0 && t.name);
 

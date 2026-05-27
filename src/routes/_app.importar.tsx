@@ -737,7 +737,7 @@ function CronogramaImporter() {
               <Button variant="outline" size="sm" onClick={() => setSelected({})}>Limpar</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set(tasks.filter((t) => t.hasChildren).map((t) => t.uid)))}>Recolher tudo</Button>
               <Button variant="outline" size="sm" onClick={() => setCollapsed(new Set())}>Expandir tudo</Button>
-              <Button onClick={importar} disabled={importing || !obraId}>
+              <Button onClick={importar} disabled={importing || !obraId || (report ? !report.ok : false)}>
                 <Upload className="h-4 w-4 mr-2" />{importing ? "Importando…" : "Importar cronograma"}
               </Button>
             </div>

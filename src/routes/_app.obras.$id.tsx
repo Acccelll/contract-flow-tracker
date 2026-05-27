@@ -1931,7 +1931,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                   ].filter(Boolean);
                   const aberta = revExpandida === r.id;
                   return (
-                    <React.Fragment key={r.id}>
+                    <Fragment key={r.id}>
                       <TableRow
                         className="cursor-pointer hover:bg-accent/40"
                         onClick={() => setRevExpandida((cur) => (cur === r.id ? null : r.id))}
@@ -1954,7 +1954,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           </TableCell>
                         </TableRow>
                       )}
-                    </React.Fragment>
+                    </Fragment>
                   );
                 })}
               </TableBody>

@@ -1407,6 +1407,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           data_fim: d.fim_novo!,
           ordem: ordemNext++,
           custo: Number((d.custo_novo || 0).toFixed(2)),
+          custo_baseline: Number((d.custo_novo || 0).toFixed(2)),
           percentual_previsto: 0,
           percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
           uid_mpp: d.uid || null,

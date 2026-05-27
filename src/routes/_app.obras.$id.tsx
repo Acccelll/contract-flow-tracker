@@ -21,6 +21,8 @@ import { brl, calcularVencimento } from "@/lib/billing";
 import { addDays, format, parseISO, differenceInCalendarDays } from "date-fns";
 import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/mpp";
 import { Switch } from "@/components/ui/switch";
+import { AditivosTab } from "@/components/obra/AditivosTab";
+import { HistoricoTab } from "@/components/obra/HistoricoTab";
 
 export const Route = createFileRoute("/_app/obras/$id")({ component: ObraDetail });
 
@@ -65,6 +67,10 @@ function ObraDetail() {
     queryKey: ["revisoes", id],
     queryFn: async () => (await supabase.from("cronograma_revisoes").select("*").eq("obra_id", id).order("numero", { ascending: false })).data ?? [],
   });
+  const { data: valores } = useQuery({
+    queryKey: ["obra_valores", id],
+    queryFn: async () => (await (supabase as any).from("vw_obra_valores").select("*").eq("obra_id", id).maybeSingle()).data,
+  });
 
   if (!obra) return <div className="p-8 text-muted-foreground">Carregando…</div>;
 
@@ -82,8 +88,16 @@ function ObraDetail() {
           <p className="text-sm text-muted-foreground">Cód. {obra.codigo} · {obra.clientes?.nome ?? "—"}</p>
         </div>
         <div className="text-right">
-          <div className="text-2xl font-semibold">{brl(obra.valor_contrato)}</div>
-          <div className="text-xs text-muted-foreground">Valor do contrato</div>
+          <div className="text-2xl font-semibold">{brl(valores?.valor_contrato_atual ?? obra.valor_contrato)}</div>
+          <div className="text-xs text-muted-foreground">
+            Contrato atual
+            {valores && Number(valores.valor_contrato_atual) !== Number(valores.valor_contrato_original) && (
+              <span className="ml-1">
+                (original {brl(valores.valor_contrato_original)} {Number(valores.valor_contrato_atual) > Number(valores.valor_contrato_original) ? "+" : ""}
+                {brl(Number(valores.valor_contrato_atual) - Number(valores.valor_contrato_original))} aditivos)
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
@@ -107,13 +121,15 @@ function ObraDetail() {
       </div>
 
       <Tabs defaultValue="previsao">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="previsao">Previsão</TabsTrigger>
           <TabsTrigger value="cronograma">Cronograma</TabsTrigger>
           <TabsTrigger value="medicoes">Medições</TabsTrigger>
           <TabsTrigger value="nfs">Faturamento</TabsTrigger>
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
+          <TabsTrigger value="aditivos">Aditivos</TabsTrigger>
           <TabsTrigger value="revisoes">Revisões</TabsTrigger>
+          <TabsTrigger value="historico">Histórico</TabsTrigger>
         </TabsList>
 
         <TabsContent value="previsao"><PrevisaoTab obra={obra} crono={crono ?? []} receb={receb ?? []} nfs={nfs ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
@@ -134,6 +150,7 @@ function ObraDetail() {
         </TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
+        <TabsContent value="aditivos"><AditivosTab obraId={id} /></TabsContent>
         <TabsContent value="revisoes">
           <RevisoesTab
             obra={obra}
@@ -146,6 +163,7 @@ function ObraDetail() {
             }}
           />
         </TabsContent>
+        <TabsContent value="historico"><HistoricoTab obraId={id} /></TabsContent>
       </Tabs>
 
     </div>

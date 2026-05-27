@@ -50,42 +50,113 @@ export type Database = {
         }
         Relationships: []
       }
+      cronograma_item_revisoes: {
+        Row: {
+          created_at: string
+          cronograma_item_id: string
+          custo_anterior: number | null
+          custo_novo: number | null
+          data_fim_anterior: string | null
+          data_fim_novo: string | null
+          data_inicio_anterior: string | null
+          data_inicio_novo: string | null
+          descricao_item: string | null
+          id: string
+          percentual_realizado_anterior: number | null
+          percentual_realizado_novo: number | null
+          revisao_id: string
+          tipo_mudanca: string
+        }
+        Insert: {
+          created_at?: string
+          cronograma_item_id: string
+          custo_anterior?: number | null
+          custo_novo?: number | null
+          data_fim_anterior?: string | null
+          data_fim_novo?: string | null
+          data_inicio_anterior?: string | null
+          data_inicio_novo?: string | null
+          descricao_item?: string | null
+          id?: string
+          percentual_realizado_anterior?: number | null
+          percentual_realizado_novo?: number | null
+          revisao_id: string
+          tipo_mudanca: string
+        }
+        Update: {
+          created_at?: string
+          cronograma_item_id?: string
+          custo_anterior?: number | null
+          custo_novo?: number | null
+          data_fim_anterior?: string | null
+          data_fim_novo?: string | null
+          data_inicio_anterior?: string | null
+          data_inicio_novo?: string | null
+          descricao_item?: string | null
+          id?: string
+          percentual_realizado_anterior?: number | null
+          percentual_realizado_novo?: number | null
+          revisao_id?: string
+          tipo_mudanca?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cronograma_item_revisoes_revisao_id_fkey"
+            columns: ["revisao_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_revisoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cronograma_itens: {
         Row: {
+          ativo: boolean
           created_at: string
           custo: number
           data_fim: string
+          data_fim_baseline: string | null
           data_inicio: string
+          data_inicio_baseline: string | null
           descricao: string | null
           id: string
           obra_id: string
           ordem: number
           percentual_previsto: number
           percentual_realizado: number
+          uid_mpp: string | null
         }
         Insert: {
+          ativo?: boolean
           created_at?: string
           custo?: number
           data_fim: string
+          data_fim_baseline?: string | null
           data_inicio: string
+          data_inicio_baseline?: string | null
           descricao?: string | null
           id?: string
           obra_id: string
           ordem?: number
           percentual_previsto?: number
           percentual_realizado?: number
+          uid_mpp?: string | null
         }
         Update: {
+          ativo?: boolean
           created_at?: string
           custo?: number
           data_fim?: string
+          data_fim_baseline?: string | null
           data_inicio?: string
+          data_inicio_baseline?: string | null
           descricao?: string | null
           id?: string
           obra_id?: string
           ordem?: number
           percentual_previsto?: number
           percentual_realizado?: number
+          uid_mpp?: string | null
         }
         Relationships: [
           {
@@ -96,6 +167,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      cronograma_revisoes: {
+        Row: {
+          arquivo_nome: string | null
+          created_at: string
+          data_corte: string
+          id: string
+          numero: number
+          obra_id: string
+          observacoes: string | null
+          totais: Json
+        }
+        Insert: {
+          arquivo_nome?: string | null
+          created_at?: string
+          data_corte: string
+          id?: string
+          numero: number
+          obra_id: string
+          observacoes?: string | null
+          totais?: Json
+        }
+        Update: {
+          arquivo_nome?: string | null
+          created_at?: string
+          data_corte?: string
+          id?: string
+          numero?: number
+          obra_id?: string
+          observacoes?: string | null
+          totais?: Json
+        }
+        Relationships: []
       }
       itens_medicao: {
         Row: {

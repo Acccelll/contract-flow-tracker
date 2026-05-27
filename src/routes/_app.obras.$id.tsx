@@ -1317,6 +1317,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           setTasksXml(tasks);
           const d = computeDiff(leaves, tasks, crono ?? []);
           setDiffs(d);
+          setStep(2);
           const n = d.filter((x) => x.tipo === "novo").length;
           const dt = d.filter((x) => x.tipo === "data").length;
           const pc = d.filter((x) => x.tipo === "pct").length;

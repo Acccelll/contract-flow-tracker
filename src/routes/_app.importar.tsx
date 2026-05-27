@@ -490,6 +490,10 @@ function CronogramaImporter() {
           ordem: i,
           custo: Number((t.custo || 0).toFixed(2)),
           percentual_previsto: Number(pctOf(t).toFixed(6)),
+          uid_mpp: t.uid || null,
+          data_inicio_baseline: t.start!,
+          data_fim_baseline: t.finish!,
+          ativo: true,
         };
       });
       const { error } = await supabase.from("cronograma_itens").insert(rows);

@@ -1862,37 +1862,87 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                   <div className="space-y-4">
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <Label>Arquivo .xml do MS Project</Label>
+                        <Label>Arquivos .xml do MS Project</Label>
                         <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
                           Tem .mpp? Veja como converter
                         </button>
                       </div>
-                      <label className="block border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors">
-                        <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                        <div className="text-sm font-medium">{arquivoNome || "Clique para escolher o arquivo XML"}</div>
-                        <div className="text-xs text-muted-foreground mt-1">Exportado em Arquivo → Salvar como → XML</div>
-                        <Input type="file" accept=".xml,.mpp" onChange={onFile} className="hidden" />
+                      <label className="block border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors">
+                        <Upload className="h-7 w-7 mx-auto mb-2 text-muted-foreground" />
+                        <div className="text-sm font-medium">
+                          {lotes.length ? "Adicionar mais arquivos" : "Clique para escolher um ou mais arquivos XML"}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Selecione vários para importar diversas revisões de uma vez (em sequência cronológica).
+                        </div>
+                        <Input type="file" accept=".xml,.mpp" multiple onChange={onFile} className="hidden" />
                       </label>
                     </div>
-                    <div className="max-w-xs">
-                      <Label>Data de corte</Label>
-                      <Input type="date" value={dataCorte} onChange={(e) => setDataCorte(e.target.value)} />
-                      <div className="text-xs text-muted-foreground mt-1">Data de referência da revisão (semana atual por padrão).</div>
-                    </div>
+
+                    {lotes.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                          {lotes.length} arquivo(s) pronto(s) — defina a data de corte de cada um
+                        </div>
+                        {lotes.map((l, idx) => {
+                          const n = l.diffs.filter((d) => d.apply).length;
+                          return (
+                            <div key={l.id} className="rounded-md border p-3 flex items-center gap-3">
+                              <div className="text-xs font-mono w-6 text-center text-muted-foreground">#{idx + 1}</div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate" title={l.arquivoNome}>{l.arquivoNome}</div>
+                                <div className="text-xs text-muted-foreground">{n} mudança(s) detectada(s)</div>
+                              </div>
+                              <div>
+                                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Data de corte</Label>
+                                <Input
+                                  type="date"
+                                  value={l.dataCorte}
+                                  onChange={(e) => atualizarDataLote(l.id, e.target.value)}
+                                  className="h-8 w-[150px]"
+                                />
+                              </div>
+                              <Button variant="ghost" size="icon" onClick={() => removerLote(l.id)} title="Remover">
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {step === 2 && diffs && (() => {
-                  const contagem: Record<DiffRow["tipo"], number> = { novo: 0, data: 0, pct: 0, custo: 0, removido: 0, restaurado: 0 };
-                  for (const d of diffs) contagem[d.tipo]++;
+                {step === 2 && lotes.length > 0 && (() => {
                   const ativos = tiposVisiveis ?? new Set(grupos.map((g) => g.tipo));
-                  const totalAplicar = diffs.filter((d) => d.apply).length;
+                  const loteAtual = lotes.find((l) => l.id === loteAtivoId) ?? lotes[0];
+                  const diffsLote = loteAtual.diffs;
+                  const contagem: Record<DiffRow["tipo"], number> = { novo: 0, data: 0, pct: 0, custo: 0, removido: 0, restaurado: 0 };
+                  for (const d of diffsLote) contagem[d.tipo]++;
+                  const totalAplicar = diffsLote.filter((d) => d.apply).length;
                   return (
                     <div className="space-y-4">
-                      {diffs.length === 0 ? (
+                      {lotes.length > 1 && (
+                        <Tabs value={loteAtual.id} onValueChange={setLoteAtivoId}>
+                          <TabsList className="w-full overflow-x-auto flex-wrap h-auto">
+                            {lotes.map((l, idx) => {
+                              const marcadas = l.diffs.filter((d) => d.apply).length;
+                              return (
+                                <TabsTrigger key={l.id} value={l.id} className="text-xs">
+                                  <span className="font-mono mr-1">#{idx + 1}</span>
+                                  <span className="max-w-[140px] truncate">{l.arquivoNome}</span>
+                                  <Badge variant="secondary" className="ml-2 h-4 px-1.5 text-[10px]">{marcadas}</Badge>
+                                </TabsTrigger>
+                              );
+                            })}
+                          </TabsList>
+                        </Tabs>
+                      )}
+
+                      {diffsLote.length === 0 ? (
                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
                           <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500" />
-                          Cronograma idêntico ao banco — nada a aplicar.
+                          Sem mudanças neste arquivo.
                         </div>
                       ) : (
                         <>
@@ -1919,7 +1969,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                               );
                             })}
                             <div className="ml-auto text-xs text-muted-foreground">
-                              {totalAplicar} de {diffs.length} marcadas
+                              {totalAplicar} de {diffsLote.length} marcadas
                             </div>
                           </div>
 
@@ -1933,7 +1983,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           <div className="space-y-2">
                             {grupos.map((g) => {
                               if (!ativos.has(g.tipo)) return null;
-                              const linhas = diffs
+                              const linhas = diffsLote
                                 .map((d, i) => ({ d, i }))
                                 .filter((x) => x.d.tipo === g.tipo)
                                 .filter((x) => !filtroDiff || x.d.descricao.toLowerCase().includes(filtroDiff.toLowerCase()));
@@ -1952,7 +2002,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          onClick={(e) => { e.stopPropagation(); toggleAll(g.tipo, !todosOn); }}
+                                          onClick={(e) => { e.stopPropagation(); toggleAll(loteAtual.id, g.tipo, !todosOn); }}
                                         >
                                           {todosOn ? "Desmarcar todos" : "Marcar todos"}
                                         </Button>
@@ -1970,7 +2020,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                                           <TableBody>
                                             {linhas.slice(0, 200).map(({ d, i }) => (
                                               <TableRow key={i}>
-                                                <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(i, e.target.checked)} /></TableCell>
+                                                <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(loteAtual.id, i, e.target.checked)} /></TableCell>
                                                 <TableCell className="max-w-[380px] truncate" title={d.descricao}>{d.descricao}</TableCell>
                                                 <TableCell className="text-xs whitespace-nowrap">{formatBefore(d)}</TableCell>
                                                 <TableCell className="text-xs whitespace-nowrap">{formatAfter(d)}</TableCell>
@@ -1994,28 +2044,49 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                   );
                 })()}
 
-                {step === 3 && diffs && (
+                {step === 3 && lotes.length > 0 && (
                   <div className="space-y-4">
-                    <Card>
-                      <CardContent className="pt-6 space-y-3">
-                        <div className="text-sm text-muted-foreground">Resumo do que será aplicado:</div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                          {grupos.map((g) => {
-                            const n = diffs.filter((d) => d.tipo === g.tipo && d.apply).length;
-                            if (!n) return null;
-                            return (
-                              <div key={g.tipo} className="rounded-md border p-2 flex items-center justify-between">
-                                <Badge className={g.cor + " border-none"}>{g.label}</Badge>
-                                <span className="font-semibold tabular-nums">{n}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Data de corte: <span className="font-medium text-foreground">{format(parseISO(dataCorte), "dd/MM/yyyy")}</span> · Arquivo: <span className="font-medium text-foreground">{arquivoNome || "—"}</span>
-                        </div>
-                      </CardContent>
-                    </Card>
+                    {lotes.length > 1 && (
+                      <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                        As {lotes.length} revisões serão aplicadas em sequência, na ordem listada. Cada uma vira uma entrada própria no histórico. Itens "novos" duplicados por <span className="font-mono">uid_mpp</span> de lotes anteriores são ignorados automaticamente.
+                      </div>
+                    )}
+
+                    {lotes.map((l, idx) => {
+                      const aplicar = l.diffs.filter((d) => d.apply);
+                      return (
+                        <Card key={l.id}>
+                          <CardHeader className="py-3">
+                            <CardTitle className="text-sm flex items-center justify-between">
+                              <span className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-muted-foreground">#{idx + 1}</span>
+                                <span className="truncate max-w-[420px]" title={l.arquivoNome}>{l.arquivoNome}</span>
+                              </span>
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {aplicar.length} de {l.diffs.length} marcadas · corte {format(parseISO(l.dataCorte), "dd/MM/yyyy")}
+                              </span>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-0 pb-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              {grupos.map((g) => {
+                                const n = aplicar.filter((d) => d.tipo === g.tipo).length;
+                                if (!n) return null;
+                                return (
+                                  <div key={g.tipo} className="rounded-md border p-2 flex items-center justify-between">
+                                    <Badge className={g.cor + " border-none"}>{g.label}</Badge>
+                                    <span className="font-semibold tabular-nums">{n}</span>
+                                  </div>
+                                );
+                              })}
+                              {aplicar.length === 0 && (
+                                <div className="col-span-full text-xs text-muted-foreground">Nenhuma mudança marcada — esta revisão será registrada vazia.</div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
 
                     <Card>
                       <CardContent className="pt-6 space-y-3">
@@ -2023,36 +2094,48 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           <Switch checked={atualizarPct} onCheckedChange={setAtualizarPct} id="att-pct" />
                           <Label htmlFor="att-pct" className="cursor-pointer text-sm font-normal leading-snug">
                             Atualizar % realizado pelo PercentComplete do XML
-                            <div className="text-xs text-muted-foreground mt-0.5">Nunca rebaixa um lançamento manual maior.</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">Aplica a todas as revisões deste lote. Nunca rebaixa um lançamento manual maior.</div>
                           </Label>
                         </div>
                         <div>
-                          <Label>Observações (opcional)</Label>
-                          <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Ex.: revisão pós reunião semanal" />
+                          <Label>Observações (opcional, aplicadas a todas)</Label>
+                          <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Ex.: revisões pós reunião mensal" />
                         </div>
                       </CardContent>
                     </Card>
+
+                    {importProgress && (
+                      <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                        Aplicando {importProgress.atual}/{importProgress.total}: <span className="font-medium">{importProgress.nome}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
               <SheetFooter className="mt-4 flex-row justify-between sm:justify-between">
-                <Button variant="ghost" disabled={step === 1} onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}>
+                <Button variant="ghost" disabled={step === 1 || importing} onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}>
                   Voltar
                 </Button>
                 {step < 3 ? (
                   <Button
-                    disabled={(step === 1 && !diffs) || (step === 2 && (!diffs || diffs.length === 0))}
+                    disabled={lotes.length === 0 || (step === 2 && lotes.every((l) => l.diffs.length === 0))}
                     onClick={() => setStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}
                   >
                     Avançar
                   </Button>
                 ) : (
-                  <Button disabled={!diffs || diffs.filter((d) => d.apply).length === 0 || importing} onClick={confirmar}>
-                    {importing ? "Aplicando…" : "Confirmar revisão"}
+                  <Button
+                    disabled={lotes.length === 0 || lotes.reduce((a, l) => a + l.diffs.filter((d) => d.apply).length, 0) === 0 || importing}
+                    onClick={confirmar}
+                  >
+                    {importing
+                      ? (importProgress ? `Aplicando ${importProgress.atual}/${importProgress.total}…` : "Aplicando…")
+                      : (lotes.length > 1 ? `Confirmar ${lotes.length} revisões` : "Confirmar revisão")}
                   </Button>
                 )}
               </SheetFooter>
+
             </SheetContent>
           </Sheet>
         </CardContent>

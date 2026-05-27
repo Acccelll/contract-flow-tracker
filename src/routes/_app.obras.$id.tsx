@@ -1821,20 +1821,38 @@ function LimparImportadosButton({
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [incluirFaturamento, setIncluirFaturamento] = useState(false);
 
-  const bloqueado = temMedicoes || temNfs || temRecebimentos;
+  const temFinanceiro = temMedicoes || temNfs || temRecebimentos;
+  const bloqueado = temFinanceiro && !incluirFaturamento;
   const podeExecutar = confirmText.trim().toUpperCase() === "LIMPAR" && !bloqueado;
 
   async function limpar() {
     if (!podeExecutar) return;
     setLoading(true);
     try {
-      // 1) Previsões de recebimento (não efetivadas) — são derivadas do cronograma
-      await supabase
-        .from("recebimentos")
-        .delete()
-        .eq("obra_id", obraId)
-        .is("data_recebimento", null);
+      if (incluirFaturamento) {
+        // 0a) Itens de medição → medições → NFs → todos recebimentos
+        const { data: meds } = await supabase
+          .from("medicoes").select("id").eq("obra_id", obraId);
+        const medIds = (meds ?? []).map((m) => m.id);
+        if (medIds.length) {
+          await supabase.from("itens_medicao").delete().in("medicao_id", medIds);
+        }
+        // Recebimentos antes das NFs (têm FK lógica nota_fiscal_id)
+        await supabase.from("recebimentos").delete().eq("obra_id", obraId);
+        await supabase.from("notas_fiscais").delete().eq("obra_id", obraId);
+        if (medIds.length) {
+          await supabase.from("medicoes").delete().in("id", medIds);
+        }
+      } else {
+        // 1) Previsões de recebimento (não efetivadas) — derivadas do cronograma
+        await supabase
+          .from("recebimentos")
+          .delete()
+          .eq("obra_id", obraId)
+          .is("data_recebimento", null);
+      }
 
       // 2) Revisões: itens primeiro, depois cabeçalhos
       const { data: revs } = await supabase
@@ -1845,7 +1863,7 @@ function LimparImportadosButton({
         await supabase.from("cronograma_revisoes").delete().in("id", revIds);
       }
 
-      // 3) Baselines de cronograma: itens primeiro, depois cabeçalhos
+      // 3) Baselines de cronograma
       const { data: bls } = await supabase
         .from("cronograma_baselines").select("id").eq("obra_id", obraId);
       const blIds = (bls ?? []).map((b) => b.id);
@@ -1860,9 +1878,14 @@ function LimparImportadosButton({
         .from("cronograma_itens").delete().eq("obra_id", obraId);
       if (errItens) throw errItens;
 
-      toast.success("Dados importados removidos. Você pode reimportar o XML.");
+      toast.success(
+        incluirFaturamento
+          ? "Cronograma e faturamento removidos. Você pode reimportar do zero."
+          : "Dados importados removidos. Você pode reimportar o XML."
+      );
       setOpen(false);
       setConfirmText("");
+      setIncluirFaturamento(false);
       onDone();
     } catch (e: any) {
       toast.error("Falha ao limpar: " + (e?.message ?? "erro desconhecido"));

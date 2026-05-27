@@ -1,60 +1,58 @@
-## Objetivo
+# Reverter revisão importada
 
-A aba **Revisões** mostra hoje, ao mesmo tempo: 3 cards de KPI, histórico completo, tabela longa de tarefas com mudança de data, e — quando o usuário clica "Nova revisão" — um Sheet enorme com arquivo, data, observações, switch de %, e 6 grupos de diffs já expandidos. É muita coisa de uma vez. O plano abaixo organiza isso em etapas claras.
+Adicionar a possibilidade de desfazer uma revisão de cronograma que foi importada por engano, reaproveitando os snapshots já gravados em `cronograma_item_revisoes` (que armazenam `_anterior` e `_novo` para cada mudança).
 
-## Mudanças na tela principal (`RevisoesTab`)
+## Escopo
 
-1. **Cabeçalho enxuto em uma linha**
-   - Trocar os 3 cards grandes por uma faixa compacta: `Atraso máx · Revisões · Última importação` + botão **Nova revisão** à direita.
-   - Card "Importar revisão" deixa de existir como cartão separado — vira só o botão.
+Apenas a **última revisão** poderá ser revertida (stack LIFO). Reverter revisões intermediárias geraria inconsistência (uma mudança posterior pode ter sobrescrito o mesmo item). A regra é: para reverter a #2, primeiro reverta a #3.
 
-2. **Histórico de revisões em formato resumido**
-   - Mostrar as 3 últimas por padrão, com "Ver todas (N)" para expandir.
-   - Colunas Novos/Datas/%/Removidos viram um único chip resumo (`+12 ✱ 3 datas · 5%`) para reduzir ruído; números detalhados em tooltip.
+Se o usuário quiser apagar tudo, já existe o botão "Limpar importados" (atualmente no topo da página). Vamos manter o comportamento atual e apenas acrescentar o "Reverter" granular.
 
-3. **"Tarefas com mudança de data" colapsada por padrão**
-   - Envolver em `<Collapsible>` (já existe em `components/ui/collapsible`), fechada por padrão com badge mostrando a contagem.
-   - Quando aberta, adicionar filtro por texto e um Select de "Δ ≥ X dias" para o usuário não rolar 100+ linhas.
-   - Limitar render inicial a 50 linhas com "Mostrar mais".
+## UX
 
-## Mudanças no sheet "Nova revisão" (wizard de 3 passos)
+**Onde:** dentro da linha do "Histórico de revisões" (mesmo lugar do screenshot anexado).
 
-Hoje o Sheet mistura entrada do arquivo, prévia de diffs e ações de confirmação no mesmo scroll. Convertê-lo em wizard com `Tabs` controladas (ou indicador 1·2·3 no topo):
+- Coluna nova "Ações" (à direita de "Importada em") com um botão `Reverter` (ícone `Undo2`).
+- O botão fica **habilitado apenas na revisão de maior `numero`**. Nas demais, fica desabilitado com tooltip: *"Reverta primeiro a revisão #N para liberar esta."*
+- Clique abre `AlertDialog` de confirmação mostrando:
+  - número, data de corte e arquivo
+  - resumo dos `totais` (novos, datas, %, custo, removidos/restaurados)
+  - aviso explícito: *"Esta ação desfaz as mudanças aplicadas por esta revisão. Itens criados serão removidos do cronograma. Datas, % e custos voltam aos valores anteriores. Não é reversível."*
+  - botão `Reverter revisão`.
+- O botão na expansão da revisão (já existe `RevisaoDetalhes`) também passa a ter um `Reverter` no topo, ao lado dos filtros, com o mesmo comportamento.
 
-**Passo 1 — Arquivo**
-- Dropzone grande (drag-and-drop) com o input `.xml,.mpp`, hint "Tem .mpp?" e o link de conversão existente.
-- Campo Data de corte (pré-preenchido com hoje).
-- Botão **Analisar** habilita ao escolher arquivo. Avança automaticamente ao parse OK.
+## Lógica do "Reverter"
 
-**Passo 2 — Revisar mudanças**
-- Topo: resumo em chips coloridos clicáveis (Novos 4 · Datas 12 · % 7 · Custo 0 · Removidos 2 · Restaurados 0). Clicar filtra os grupos exibidos.
-- Cada grupo vira um `<Collapsible>` fechado por padrão, com header já mostrando contagem e ações "marcar/desmarcar todos".
-- Estado vazio claro quando `diffs.length === 0` ("Cronograma idêntico ao banco, nada a aplicar").
-- Busca por descrição no topo.
+Função `reverterRevisao(revisaoId)` em `RevisoesTab`:
 
-**Passo 3 — Confirmar**
-- Card final com: contagem de mudanças que serão aplicadas (apenas as `apply: true`), switch "Atualizar % realizado", campo Observações.
-- Botões **Voltar** e **Confirmar revisão**.
+1. Carregar `cronograma_item_revisoes` da revisão (`tipo_mudanca`, `cronograma_item_id`, valores `_anterior` e `_novo`).
+2. Para cada snapshot, agir conforme `tipo_mudanca`:
+   - **novo** → `DELETE cronograma_dependencias WHERE item_id = X` e `DELETE cronograma_itens WHERE id = X` (item foi criado pela revisão; remover por completo).
+     - Verificar se há `itens_medicao` apontando para esse item; se houver, **abortar** a reversão com mensagem clara ("Item X já possui medição lançada; remova a medição antes de reverter").
+   - **removido** → `UPDATE cronograma_itens SET ativo = true WHERE id = X`.
+   - **restaurado** → `UPDATE cronograma_itens SET ativo = false WHERE id = X`.
+   - **data** → `UPDATE SET data_inicio = data_inicio_anterior, data_fim = data_fim_anterior`.
+   - **pct** → `UPDATE SET percentual_realizado = percentual_realizado_anterior`.
+   - **custo** → `UPDATE SET custo = custo_anterior` (branch quase morto hoje, mas mantém simetria).
+3. Recalcular `percentual_previsto` proporcional ao `custo_baseline` entre itens ativos (mesma lógica usada em `confirmar()`).
+4. `DELETE cronograma_item_revisoes WHERE revisao_id = X` e `DELETE cronograma_revisoes WHERE id = X`.
+5. `onChange()` para invalidar queries (`crono`, `revisoes`, `receb`).
+6. `toast.success("Revisão #N revertida")`.
 
-Navegação: stepper persistente no `SheetHeader`, com "Voltar" sempre disponível. O fluxo atual de parse/confirmação (`onFile`, `confirmar`, `toggleRow`, `toggleAll`) permanece — apenas reorganizado em passos.
+## Validações / proteções
 
-## Detalhes técnicos
+- Só permite reverter a revisão com maior `numero` (validação no client + cheque no handler).
+- Bloqueia quando algum item "novo" desta revisão já tem `itens_medicao` associado, com toast explicando o motivo e oferecendo "Limpar importados" como saída radical.
+- Loading state no botão durante a operação.
 
-- Toda mudança fica em `src/routes/_app.obras.$id.tsx` no componente `RevisoesTab` (linhas ~1253-1806). Sem alterações de schema, lógica de parse, RLS ou queries.
-- Componentes novos auxiliares (`StepIndicator`, `DiffSummaryChips`, `DropzoneFile`) podem ficar inline no mesmo arquivo para evitar churn.
-- Reuso de `Collapsible`, `Tabs`, `Badge`, `Sheet` já existentes.
-- Sem mudanças no `CompararRevisoesTab` nem no `MppNotSupportedDialog`.
+## Arquivos a alterar
 
-## Critérios de aceite
-
-- Ao abrir a aba Revisões, o usuário vê no máximo 1 viewport de informação antes de rolar.
-- Lista de "Tarefas com mudança de data" começa fechada com contagem visível.
-- Sheet "Nova revisão" abre no Passo 1 com só dropzone + data. Diffs só aparecem após o parse, no Passo 2.
-- Confirmação acontece num passo dedicado com resumo do que será aplicado.
-- Nenhuma regressão na lógica: parse de XML, toggles individuais/em massa, switch de %, e gravação da revisão funcionam como antes.
+- `src/routes/_app.obras.$id.tsx`
+  - `RevisoesTab`: adicionar coluna/ação na tabela do "Histórico de revisões", `AlertDialog` de confirmação, função `reverterRevisao`, e botão equivalente dentro de `RevisaoDetalhes` (passando `revisaoId` + flag `podeReverter`).
+  - Importar `Undo2` do `lucide-react` e `AlertDialog*` (já estão sendo usados em outros pontos do arquivo, então só consumo).
 
 ## Fora de escopo
 
-- Suporte direto a `.mpp` (continua via instrução de conversão).
-- Refatorar a aba Comparar.
-- Mudanças no modelo de dados.
+- Reverter revisões intermediárias (exige merge complexo de mudanças posteriores).
+- Restaurar `cronograma_dependencias` apagadas ao reverter um "novo" (são recriadas se o XML for reimportado).
+- Mudanças em RLS/schema: a tabela `cronograma_item_revisoes` já carrega tudo que precisamos.

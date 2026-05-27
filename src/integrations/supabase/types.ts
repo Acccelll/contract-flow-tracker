@@ -162,6 +162,7 @@ export type Database = {
           percentual_previsto: number
           percentual_realizado: number
           uid_mpp: string | null
+          versao_otimista: number
         }
         Insert: {
           ativo?: boolean
@@ -179,6 +180,7 @@ export type Database = {
           percentual_previsto?: number
           percentual_realizado?: number
           uid_mpp?: string | null
+          versao_otimista?: number
         }
         Update: {
           ativo?: boolean
@@ -196,6 +198,7 @@ export type Database = {
           percentual_previsto?: number
           percentual_realizado?: number
           uid_mpp?: string | null
+          versao_otimista?: number
         }
         Relationships: [
           {
@@ -302,6 +305,7 @@ export type Database = {
           status: Database["public"]["Enums"]["medicao_status"]
           updated_at: string
           valor: number
+          versao_otimista: number
         }
         Insert: {
           created_at?: string
@@ -316,6 +320,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["medicao_status"]
           updated_at?: string
           valor?: number
+          versao_otimista?: number
         }
         Update: {
           created_at?: string
@@ -330,6 +335,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["medicao_status"]
           updated_at?: string
           valor?: number
+          versao_otimista?: number
         }
         Relationships: [
           {
@@ -363,6 +369,7 @@ export type Database = {
           valor: number
           valor_liquido: number | null
           valor_servicos: number | null
+          versao_otimista: number
         }
         Insert: {
           codigo_verificacao?: string | null
@@ -385,6 +392,7 @@ export type Database = {
           valor?: number
           valor_liquido?: number | null
           valor_servicos?: number | null
+          versao_otimista?: number
         }
         Update: {
           codigo_verificacao?: string | null
@@ -407,6 +415,7 @@ export type Database = {
           valor?: number
           valor_liquido?: number | null
           valor_servicos?: number | null
+          versao_otimista?: number
         }
         Relationships: [
           {
@@ -513,6 +522,7 @@ export type Database = {
           valor_previsto: number
           valor_previsto_inicial: number | null
           valor_recebido: number | null
+          versao_otimista: number
         }
         Insert: {
           congelado?: boolean
@@ -530,6 +540,7 @@ export type Database = {
           valor_previsto?: number
           valor_previsto_inicial?: number | null
           valor_recebido?: number | null
+          versao_otimista?: number
         }
         Update: {
           congelado?: boolean
@@ -547,6 +558,7 @@ export type Database = {
           valor_previsto?: number
           valor_previsto_inicial?: number | null
           valor_recebido?: number | null
+          versao_otimista?: number
         }
         Relationships: [
           {

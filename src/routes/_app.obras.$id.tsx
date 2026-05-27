@@ -1312,7 +1312,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
       const inicioMudou = String(item.data_inicio) !== String(t.start);
       const fimMudou = String(item.data_fim) !== String(t.finish);
       const pctMudou = Math.abs(Number(item.percentual_realizado || 0) - t.percentComplete) > 0.01;
-      const custoMudou = Math.abs(Number(item.custo || 0) - t.custo) > 0.005;
+      // Onda 1.3: XML nunca altera custo de itens existentes (custo é congelado pela baseline).
 
       if (inicioMudou || fimMudou) {
         result.push({
@@ -1340,18 +1340,8 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           apply: true,
         });
       }
-      if (custoMudou) {
-        result.push({
-          tipo: "custo",
-          itemId: item.id,
-          uid: t.uid,
-          descricao: item.descricao,
-          custo_antes: Number(item.custo || 0),
-          custo_novo: t.custo,
-          task: t,
-          apply: true,
-        });
-      }
+      // Bloco de detecção de mudança de custo removido (Onda 1.3).
+
     }
 
     // Removidos: itens ativos que não bateram com nenhuma tarefa
@@ -1467,9 +1457,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           log.percentual_realizado_anterior = d.pct_antes;
           log.percentual_realizado_novo = d.pct_novo;
         } else if (d.tipo === "custo") {
-          update.custo = Number((d.custo_novo || 0).toFixed(2));
-          log.custo_anterior = d.custo_antes;
-          log.custo_novo = d.custo_novo;
+          // Onda 1.3: XML não altera mais custo de itens existentes — branch mantido apenas por compat.
         } else if (d.tipo === "removido") {
           update.ativo = false;
         } else if (d.tipo === "restaurado") {

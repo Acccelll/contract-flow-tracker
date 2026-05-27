@@ -1251,15 +1251,24 @@ type DiffRow = {
   apply: boolean;
 };
 
+type Lote = {
+  id: string;
+  arquivoNome: string;
+  tasksXml: MppTask[];
+  diffs: DiffRow[];
+  dataCorte: string;
+};
+
+
+
 function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: any[]; revisoes: any[]; onChange: () => void }) {
   const [open, setOpen] = useState(false);
-  const [arquivoNome, setArquivoNome] = useState<string>("");
-  const [dataCorte, setDataCorte] = useState<string>(format(new Date(), "yyyy-MM-dd"));
+  const [lotes, setLotes] = useState<Lote[]>([]);
+  const [loteAtivoId, setLoteAtivoId] = useState<string | null>(null);
   const [obs, setObs] = useState<string>("");
   const [atualizarPct, setAtualizarPct] = useState<boolean>(true);
-  const [diffs, setDiffs] = useState<DiffRow[] | null>(null);
-  const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ atual: number; total: number; nome: string } | null>(null);
   const [mppDialogOpen, setMppDialogOpen] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [filtroDiff, setFiltroDiff] = useState("");
@@ -1275,12 +1284,12 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
 
   function resetSheet() {
     setStep(1);
-    setDiffs(null);
-    setTasksXml([]);
-    setArquivoNome("");
+    setLotes([]);
+    setLoteAtivoId(null);
     setObs("");
     setFiltroDiff("");
     setTiposVisiveis(null);
+    setImportProgress(null);
   }
 
   const obraId = obra.id;
@@ -1300,40 +1309,61 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const atrasados = atrasos.filter((a) => a.delta > 0);
   const atrasoMax = atrasos.reduce((m, a) => Math.max(m, a.delta), 0);
 
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    isMppBinary(file).then((isBin) => {
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    e.target.value = "";
+
+    const novosLotes: Lote[] = [];
+    let primeiroBinario = false;
+    for (const file of files) {
+      const isBin = await isMppBinary(file);
       if (isBin) {
         console.info("mpp_upload_attempt");
-        setMppDialogOpen(true);
-        e.target.value = "";
-        return;
+        primeiroBinario = true;
+        continue;
       }
-      setArquivoNome(file.name);
-      setDiffs(null);
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const text = String(ev.target?.result ?? "");
-          const { tasks } = parseMppXml(text);
-          const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
-          setTasksXml(tasks);
-          const d = computeDiff(leaves, tasks, crono ?? []);
-          setDiffs(d);
-          setStep(2);
-          const n = d.filter((x) => x.tipo === "novo").length;
-          const dt = d.filter((x) => x.tipo === "data").length;
-          const pc = d.filter((x) => x.tipo === "pct").length;
-          const rm = d.filter((x) => x.tipo === "removido").length;
-          toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
-        } catch (err: any) {
-          toast.error(`Erro ao ler XML: ${err.message}`);
-        }
-      };
-      reader.readAsText(file);
+      try {
+        const text = await file.text();
+        const { tasks } = parseMppXml(text);
+        const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
+        const d = computeDiff(leaves, tasks, crono ?? []);
+        novosLotes.push({
+          id: (typeof crypto !== "undefined" && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : Math.random().toString(36).slice(2),
+          arquivoNome: file.name,
+          tasksXml: tasks,
+          diffs: d,
+          dataCorte: format(new Date(), "yyyy-MM-dd"),
+        });
+      } catch (err: any) {
+        toast.error(`Erro ao ler ${file.name}: ${err.message}`);
+      }
+    }
+    if (primeiroBinario) setMppDialogOpen(true);
+    if (novosLotes.length) {
+      setLotes((prev) => {
+        const combined = [...prev, ...novosLotes];
+        if (!loteAtivoId) setLoteAtivoId(combined[0].id);
+        return combined;
+      });
+      const totalMud = novosLotes.reduce((a, l) => a + l.diffs.length, 0);
+      toast.success(`${novosLotes.length} arquivo(s) preparado(s) · ${totalMud} mudanças detectadas`);
+      setStep(2);
+    }
+  }
+
+  function removerLote(id: string) {
+    setLotes((prev) => {
+      const novo = prev.filter((l) => l.id !== id);
+      if (loteAtivoId === id) setLoteAtivoId(novo[0]?.id ?? null);
+      return novo;
     });
   }
+
+  function atualizarDataLote(id: string, dataCorte: string) {
+    setLotes((prev) => prev.map((l) => (l.id === id ? { ...l, dataCorte } : l)));
+  }
+
 
   // Diff: casa por uid_mpp, com fallback (wbs+nome) — usado para itens importados antes desta feature.
   function computeDiff(leaves: MppTask[], allTasks: MppTask[], itens: any[]): DiffRow[] {
@@ -1448,210 +1478,242 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
     return wbsPrefix + t.name + (chain ? `  ·  [${chain}]` : "");
   }
 
-  function toggleRow(idx: number, value: boolean) {
-    setDiffs((d) => d?.map((r, i) => (i === idx ? { ...r, apply: value } : r)) ?? null);
+  function toggleRow(loteId: string, idx: number, value: boolean) {
+    setLotes((prev) => prev.map((l) => l.id === loteId
+      ? { ...l, diffs: l.diffs.map((r, i) => (i === idx ? { ...r, apply: value } : r)) }
+      : l));
   }
-  function toggleAll(tipo: DiffRow["tipo"], value: boolean) {
-    setDiffs((d) => d?.map((r) => (r.tipo === tipo ? { ...r, apply: value } : r)) ?? null);
+  function toggleAll(loteId: string, tipo: DiffRow["tipo"], value: boolean) {
+    setLotes((prev) => prev.map((l) => l.id === loteId
+      ? { ...l, diffs: l.diffs.map((r) => (r.tipo === tipo ? { ...r, apply: value } : r)) }
+      : l));
+  }
+
+  // Aplica um lote. cronoAtual reflete o estado do banco antes deste lote
+  // (refetched a cada iteração para encadear corretamente). Retorna o novo número.
+  async function aplicarLote(lote: Lote, ultimoNumero: number, cronoAtual: any[]): Promise<number> {
+    const aplicar = lote.diffs.filter((d) => d.apply);
+    const itensRevisao: any[] = [];
+    const itensAtivos = cronoAtual.filter((i) => i.ativo !== false);
+    const ordemBase = itensAtivos.length;
+    let ordemNext = ordemBase;
+
+    // 1) Novos itens — pula duplicatas por uid_mpp se já existem (cascata entre lotes)
+    const uidsExistentes = new Set(cronoAtual.map((i) => i.uid_mpp).filter(Boolean).map(String));
+    const novos = aplicar.filter((d) => d.tipo === "novo" && !(d.uid && uidsExistentes.has(d.uid)));
+    if (novos.length) {
+      const rows = novos.map((d) => ({
+        obra_id: obraId,
+        descricao: d.descricao,
+        data_inicio: d.inicio_novo!,
+        data_fim: d.fim_novo!,
+        ordem: ordemNext++,
+        custo: Number((d.custo_novo || 0).toFixed(2)),
+        custo_baseline: Number((d.custo_novo || 0).toFixed(2)),
+        percentual_previsto: 0,
+        percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
+        uid_mpp: d.uid || null,
+        data_inicio_baseline: d.inicio_novo!,
+        data_fim_baseline: d.fim_novo!,
+        ativo: true,
+      }));
+      const { data: ins, error } = await supabase
+        .from("cronograma_itens")
+        .insert(rows)
+        .select("id, descricao, data_inicio, data_fim, custo, percentual_realizado");
+      if (error) throw error;
+      ins?.forEach((row: any) => {
+        itensRevisao.push({
+          cronograma_item_id: row.id,
+          descricao_item: row.descricao,
+          tipo_mudanca: "novo",
+          data_inicio_anterior: null, data_inicio_novo: row.data_inicio,
+          data_fim_anterior: null, data_fim_novo: row.data_fim,
+          custo_anterior: null, custo_novo: row.custo,
+          percentual_realizado_anterior: null,
+          percentual_realizado_novo: row.percentual_realizado,
+        });
+      });
+    }
+
+    // G4.1: persistir dependências (predecessors) dos novos itens
+    if (novos.length) {
+      const { data: novosSalvos } = await supabase
+        .from("cronograma_itens")
+        .select("id, uid_mpp")
+        .eq("obra_id", obraId)
+        .in("uid_mpp", novos.map((d) => d.uid).filter(Boolean));
+      const byUid = new Map((novosSalvos ?? []).filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]));
+      const deps: any[] = [];
+      for (const d of novos) {
+        const itemId = byUid.get(String(d.uid));
+        if (!itemId || !d.task) continue;
+        for (const p of d.task.predecessors ?? []) {
+          deps.push({
+            obra_id: obraId,
+            item_id: itemId,
+            predecessor_uid_mpp: p.predecessorUid,
+            tipo: p.tipo,
+            lag_dias: p.lagDias,
+          });
+        }
+      }
+      if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
+    }
+
+    // 2) Updates por item existente
+    for (const d of aplicar) {
+      if (!d.itemId) continue;
+      if (d.tipo === "novo") continue;
+
+      const item = cronoAtual.find((i) => i.id === d.itemId);
+      if (!item) continue;
+      const update: any = {};
+      const log: any = {
+        cronograma_item_id: d.itemId,
+        descricao_item: item?.descricao ?? d.descricao,
+        tipo_mudanca: d.tipo,
+      };
+
+      if (d.tipo === "data") {
+        update.data_inicio = d.inicio_novo;
+        update.data_fim = d.fim_novo;
+        log.data_inicio_anterior = d.inicio_antes;
+        log.data_inicio_novo = d.inicio_novo;
+        log.data_fim_anterior = d.fim_antes;
+        log.data_fim_novo = d.fim_novo;
+        if (item && !item.data_inicio_baseline) update.data_inicio_baseline = d.inicio_antes;
+        if (item && !item.data_fim_baseline) update.data_fim_baseline = d.fim_antes;
+      } else if (d.tipo === "pct") {
+        if (atualizarPct) {
+          const novo = Number(d.pct_novo || 0);
+          const atual = Number(d.pct_antes || 0);
+          if (novo >= atual) update.percentual_realizado = novo;
+        }
+        log.percentual_realizado_anterior = d.pct_antes;
+        log.percentual_realizado_novo = d.pct_novo;
+      } else if (d.tipo === "custo") {
+        // Onda 1.3: XML não altera custo de itens existentes.
+      } else if (d.tipo === "removido") {
+        update.ativo = false;
+      } else if (d.tipo === "restaurado") {
+        update.ativo = true;
+        if (d.task) {
+          update.data_inicio = d.task.start;
+          update.data_fim = d.task.finish;
+        }
+      }
+
+      if (Object.keys(update).length) {
+        const { error } = await supabase.from("cronograma_itens").update(update).eq("id", d.itemId);
+        if (error) throw error;
+      }
+      itensRevisao.push(log);
+    }
+
+    // 3) Recalcular percentual_previsto proporcional ao custo_baseline
+    const { data: vivos } = await supabase
+      .from("cronograma_itens")
+      .select("id, custo, custo_baseline, percentual_previsto")
+      .eq("obra_id", obraId)
+      .eq("ativo", true);
+    const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+    const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
+    if (totalCusto > 0) {
+      await Promise.all(
+        (vivos ?? []).map((i) =>
+          supabase
+            .from("cronograma_itens")
+            .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
+            .eq("id", i.id),
+        ),
+      );
+    }
+
+    // 4) Cabeçalho da revisão
+    const numero = ultimoNumero + 1;
+    const totais = {
+      itens_total: lote.tasksXml.filter((t) => !t.hasChildren).length,
+      novos: novos.length,
+      alterados_data: aplicar.filter((d) => d.tipo === "data").length,
+      alterados_pct: aplicar.filter((d) => d.tipo === "pct").length,
+      alterados_custo: aplicar.filter((d) => d.tipo === "custo").length,
+      removidos: aplicar.filter((d) => d.tipo === "removido").length,
+      restaurados: aplicar.filter((d) => d.tipo === "restaurado").length,
+      custo_total: lote.tasksXml.filter((t) => !t.hasChildren).reduce((a, t) => a + (t.custo || 0), 0),
+    };
+    const { data: rev, error: revErr } = await supabase
+      .from("cronograma_revisoes")
+      .insert({
+        obra_id: obraId,
+        numero,
+        data_corte: lote.dataCorte,
+        arquivo_nome: lote.arquivoNome || null,
+        observacoes: obs || null,
+        totais,
+      })
+      .select("id")
+      .single();
+    if (revErr) throw revErr;
+
+    // 5) Snapshots
+    if (itensRevisao.length) {
+      const rows = itensRevisao.map((r) => ({ ...r, revisao_id: rev!.id }));
+      const { error } = await supabase.from("cronograma_item_revisoes").insert(rows);
+      if (error) throw error;
+    }
+
+    return numero;
   }
 
   async function confirmar() {
-    if (!diffs || diffs.length === 0) {
-      toast.error("Nenhuma mudança para aplicar");
+    if (!lotes.length) {
+      toast.error("Nenhum arquivo carregado");
+      return;
+    }
+    const totalDiffs = lotes.reduce((a, l) => a + l.diffs.filter((d) => d.apply).length, 0);
+    if (totalDiffs === 0) {
+      toast.error("Nenhuma mudança marcada para aplicar");
       return;
     }
     setImporting(true);
+    let totalNovos = 0;
     try {
-      const aplicar = diffs.filter((d) => d.apply);
-      const itensRevisao: any[] = [];
-      const itensAtivos = (crono ?? []).filter((i) => i.ativo !== false);
-      const ordemBase = itensAtivos.length;
-      let ordemNext = ordemBase;
-
-      // 1) Novos itens
-      const novos = aplicar.filter((d) => d.tipo === "novo");
-      if (novos.length) {
-        const rows = novos.map((d) => ({
-          obra_id: obraId,
-          descricao: d.descricao,
-          data_inicio: d.inicio_novo!,
-          data_fim: d.fim_novo!,
-          ordem: ordemNext++,
-          custo: Number((d.custo_novo || 0).toFixed(2)),
-          custo_baseline: Number((d.custo_novo || 0).toFixed(2)),
-          percentual_previsto: 0,
-          percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
-          uid_mpp: d.uid || null,
-          data_inicio_baseline: d.inicio_novo!,
-          data_fim_baseline: d.fim_novo!,
-          ativo: true,
-        }));
-        const { data: ins, error } = await supabase
-          .from("cronograma_itens")
-          .insert(rows)
-          .select("id, descricao, data_inicio, data_fim, custo, percentual_realizado");
-        if (error) throw error;
-        ins?.forEach((row: any) => {
-          itensRevisao.push({
-            cronograma_item_id: row.id,
-            descricao_item: row.descricao,
-            tipo_mudanca: "novo",
-            data_inicio_anterior: null, data_inicio_novo: row.data_inicio,
-            data_fim_anterior: null, data_fim_novo: row.data_fim,
-            custo_anterior: null, custo_novo: row.custo,
-            percentual_realizado_anterior: null,
-            percentual_realizado_novo: row.percentual_realizado,
-          });
-        });
-      }
-
-      // G4.1: persistir dependências (predecessors) dos novos itens, se vieram no XML
-      if (novos.length) {
-        const { data: novosSalvos } = await supabase
-          .from("cronograma_itens")
-          .select("id, uid_mpp")
-          .eq("obra_id", obraId)
-          .in("uid_mpp", novos.map((d) => d.uid).filter(Boolean));
-        const byUid = new Map((novosSalvos ?? []).filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]));
-        const deps: any[] = [];
-        for (const d of novos) {
-          const itemId = byUid.get(String(d.uid));
-          if (!itemId || !d.task) continue;
-          for (const p of d.task.predecessors ?? []) {
-            deps.push({
-              obra_id: obraId,
-              item_id: itemId,
-              predecessor_uid_mpp: p.predecessorUid,
-              tipo: p.tipo,
-              lag_dias: p.lagDias,
-            });
-          }
+      let ultimoNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
+      let cronoAtual: any[] = crono ?? [];
+      for (let idx = 0; idx < lotes.length; idx++) {
+        const lote = lotes[idx];
+        setImportProgress({ atual: idx + 1, total: lotes.length, nome: lote.arquivoNome });
+        ultimoNumero = await aplicarLote(lote, ultimoNumero, cronoAtual);
+        totalNovos += lote.diffs.filter((d) => d.apply && d.tipo === "novo").length;
+        // refetch crono para o próximo lote
+        if (idx < lotes.length - 1) {
+          const { data: fresh } = await supabase
+            .from("cronograma_itens")
+            .select("*")
+            .eq("obra_id", obraId);
+          cronoAtual = fresh ?? [];
         }
-        if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
       }
 
-      // 2) Updates por item existente
-      for (const d of aplicar) {
-        if (!d.itemId) continue;
-        if (d.tipo === "novo") continue;
-
-        const item = (crono ?? []).find((i) => i.id === d.itemId);
-        const update: any = {};
-        const log: any = {
-          cronograma_item_id: d.itemId,
-          descricao_item: item?.descricao ?? d.descricao,
-          tipo_mudanca: d.tipo,
-        };
-
-        if (d.tipo === "data") {
-          update.data_inicio = d.inicio_novo;
-          update.data_fim = d.fim_novo;
-          log.data_inicio_anterior = d.inicio_antes;
-          log.data_inicio_novo = d.inicio_novo;
-          log.data_fim_anterior = d.fim_antes;
-          log.data_fim_novo = d.fim_novo;
-          // baseline só se ainda não existir
-          if (item && !item.data_inicio_baseline) update.data_inicio_baseline = d.inicio_antes;
-          if (item && !item.data_fim_baseline) update.data_fim_baseline = d.fim_antes;
-        } else if (d.tipo === "pct") {
-          if (atualizarPct) {
-            // só sobrescreve se o XML for >= ao atual (não rebaixar lançamento manual)
-            const novo = Number(d.pct_novo || 0);
-            const atual = Number(d.pct_antes || 0);
-            if (novo >= atual) update.percentual_realizado = novo;
-          }
-          log.percentual_realizado_anterior = d.pct_antes;
-          log.percentual_realizado_novo = d.pct_novo;
-        } else if (d.tipo === "custo") {
-          // Onda 1.3: XML não altera mais custo de itens existentes — branch mantido apenas por compat.
-        } else if (d.tipo === "removido") {
-          update.ativo = false;
-        } else if (d.tipo === "restaurado") {
-          update.ativo = true;
-          if (d.task) {
-            update.data_inicio = d.task.start;
-            update.data_fim = d.task.finish;
-          }
-        }
-
-        if (Object.keys(update).length) {
-          const { error } = await supabase.from("cronograma_itens").update(update).eq("id", d.itemId);
-          if (error) throw error;
-        }
-        itensRevisao.push(log);
-      }
-
-      // 3) Recalcular percentual_previsto proporcional ao custo_baseline entre todos ativos
-      //    (usa baseline para não "dançar" toda semana com os custos remanescentes do XML).
-      const { data: vivos } = await supabase
-        .from("cronograma_itens")
-        .select("id, custo, custo_baseline, percentual_previsto")
-        .eq("obra_id", obraId)
-        .eq("ativo", true);
-      const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
-      const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
-      if (totalCusto > 0) {
-        await Promise.all(
-          (vivos ?? []).map((i) =>
-            supabase
-              .from("cronograma_itens")
-              .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
-              .eq("id", i.id),
-          ),
-        );
-      }
-
-      // 4) Cabeçalho da revisão
-      const ultimoNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
-      const totais = {
-        itens_total: tasksXml.filter((t) => !t.hasChildren).length,
-        novos: aplicar.filter((d) => d.tipo === "novo").length,
-        alterados_data: aplicar.filter((d) => d.tipo === "data").length,
-        alterados_pct: aplicar.filter((d) => d.tipo === "pct").length,
-        alterados_custo: aplicar.filter((d) => d.tipo === "custo").length,
-        removidos: aplicar.filter((d) => d.tipo === "removido").length,
-        restaurados: aplicar.filter((d) => d.tipo === "restaurado").length,
-        custo_total: tasksXml.filter((t) => !t.hasChildren).reduce((a, t) => a + (t.custo || 0), 0),
-      };
-      const { data: rev, error: revErr } = await supabase
-        .from("cronograma_revisoes")
-        .insert({
-          obra_id: obraId,
-          numero: ultimoNumero + 1,
-          data_corte: dataCorte,
-          arquivo_nome: arquivoNome || null,
-          observacoes: obs || null,
-          totais,
-        })
-        .select("id")
-        .single();
-      if (revErr) throw revErr;
-
-      // 5) Snapshots dos itens
-      if (itensRevisao.length) {
-        const rows = itensRevisao.map((r) => ({ ...r, revisao_id: rev!.id }));
-        const { error } = await supabase.from("cronograma_item_revisoes").insert(rows);
-        if (error) throw error;
-      }
-
-      toast.success(`Revisão #${ultimoNumero + 1} registrada`);
-      if (novos.length > 0) {
+      toast.success(`${lotes.length} revisão(ões) registrada(s)`);
+      if (totalNovos > 0) {
         toast.warning(
-          `${novos.length} item(ns) novo(s) adicionado(s) à baseline. Mudanças contratuais devem ser registradas como aditivo (aba Aditivos). Alteração registrada no histórico.`,
+          `${totalNovos} item(ns) novo(s) adicionado(s) à baseline. Mudanças contratuais devem ser registradas como aditivo (aba Aditivos). Alteração registrada no histórico.`,
           { duration: 8000 },
         );
       }
       setOpen(false);
-      setDiffs(null);
-      setArquivoNome("");
-      setObs("");
+      resetSheet();
       onChange();
     } catch (err: any) {
       toast.error(err.message ?? "Erro ao aplicar revisão");
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   }
+
 
   const maxNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
 
@@ -1800,37 +1862,87 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                   <div className="space-y-4">
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <Label>Arquivo .xml do MS Project</Label>
+                        <Label>Arquivos .xml do MS Project</Label>
                         <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
                           Tem .mpp? Veja como converter
                         </button>
                       </div>
-                      <label className="block border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors">
-                        <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                        <div className="text-sm font-medium">{arquivoNome || "Clique para escolher o arquivo XML"}</div>
-                        <div className="text-xs text-muted-foreground mt-1">Exportado em Arquivo → Salvar como → XML</div>
-                        <Input type="file" accept=".xml,.mpp" onChange={onFile} className="hidden" />
+                      <label className="block border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors">
+                        <Upload className="h-7 w-7 mx-auto mb-2 text-muted-foreground" />
+                        <div className="text-sm font-medium">
+                          {lotes.length ? "Adicionar mais arquivos" : "Clique para escolher um ou mais arquivos XML"}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Selecione vários para importar diversas revisões de uma vez (em sequência cronológica).
+                        </div>
+                        <Input type="file" accept=".xml,.mpp" multiple onChange={onFile} className="hidden" />
                       </label>
                     </div>
-                    <div className="max-w-xs">
-                      <Label>Data de corte</Label>
-                      <Input type="date" value={dataCorte} onChange={(e) => setDataCorte(e.target.value)} />
-                      <div className="text-xs text-muted-foreground mt-1">Data de referência da revisão (semana atual por padrão).</div>
-                    </div>
+
+                    {lotes.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                          {lotes.length} arquivo(s) pronto(s) — defina a data de corte de cada um
+                        </div>
+                        {lotes.map((l, idx) => {
+                          const n = l.diffs.filter((d) => d.apply).length;
+                          return (
+                            <div key={l.id} className="rounded-md border p-3 flex items-center gap-3">
+                              <div className="text-xs font-mono w-6 text-center text-muted-foreground">#{idx + 1}</div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate" title={l.arquivoNome}>{l.arquivoNome}</div>
+                                <div className="text-xs text-muted-foreground">{n} mudança(s) detectada(s)</div>
+                              </div>
+                              <div>
+                                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Data de corte</Label>
+                                <Input
+                                  type="date"
+                                  value={l.dataCorte}
+                                  onChange={(e) => atualizarDataLote(l.id, e.target.value)}
+                                  className="h-8 w-[150px]"
+                                />
+                              </div>
+                              <Button variant="ghost" size="icon" onClick={() => removerLote(l.id)} title="Remover">
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {step === 2 && diffs && (() => {
-                  const contagem: Record<DiffRow["tipo"], number> = { novo: 0, data: 0, pct: 0, custo: 0, removido: 0, restaurado: 0 };
-                  for (const d of diffs) contagem[d.tipo]++;
+                {step === 2 && lotes.length > 0 && (() => {
                   const ativos = tiposVisiveis ?? new Set(grupos.map((g) => g.tipo));
-                  const totalAplicar = diffs.filter((d) => d.apply).length;
+                  const loteAtual = lotes.find((l) => l.id === loteAtivoId) ?? lotes[0];
+                  const diffsLote = loteAtual.diffs;
+                  const contagem: Record<DiffRow["tipo"], number> = { novo: 0, data: 0, pct: 0, custo: 0, removido: 0, restaurado: 0 };
+                  for (const d of diffsLote) contagem[d.tipo]++;
+                  const totalAplicar = diffsLote.filter((d) => d.apply).length;
                   return (
                     <div className="space-y-4">
-                      {diffs.length === 0 ? (
+                      {lotes.length > 1 && (
+                        <Tabs value={loteAtual.id} onValueChange={setLoteAtivoId}>
+                          <TabsList className="w-full overflow-x-auto flex-wrap h-auto">
+                            {lotes.map((l, idx) => {
+                              const marcadas = l.diffs.filter((d) => d.apply).length;
+                              return (
+                                <TabsTrigger key={l.id} value={l.id} className="text-xs">
+                                  <span className="font-mono mr-1">#{idx + 1}</span>
+                                  <span className="max-w-[140px] truncate">{l.arquivoNome}</span>
+                                  <Badge variant="secondary" className="ml-2 h-4 px-1.5 text-[10px]">{marcadas}</Badge>
+                                </TabsTrigger>
+                              );
+                            })}
+                          </TabsList>
+                        </Tabs>
+                      )}
+
+                      {diffsLote.length === 0 ? (
                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
                           <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500" />
-                          Cronograma idêntico ao banco — nada a aplicar.
+                          Sem mudanças neste arquivo.
                         </div>
                       ) : (
                         <>
@@ -1857,7 +1969,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                               );
                             })}
                             <div className="ml-auto text-xs text-muted-foreground">
-                              {totalAplicar} de {diffs.length} marcadas
+                              {totalAplicar} de {diffsLote.length} marcadas
                             </div>
                           </div>
 
@@ -1871,7 +1983,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           <div className="space-y-2">
                             {grupos.map((g) => {
                               if (!ativos.has(g.tipo)) return null;
-                              const linhas = diffs
+                              const linhas = diffsLote
                                 .map((d, i) => ({ d, i }))
                                 .filter((x) => x.d.tipo === g.tipo)
                                 .filter((x) => !filtroDiff || x.d.descricao.toLowerCase().includes(filtroDiff.toLowerCase()));
@@ -1890,7 +2002,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          onClick={(e) => { e.stopPropagation(); toggleAll(g.tipo, !todosOn); }}
+                                          onClick={(e) => { e.stopPropagation(); toggleAll(loteAtual.id, g.tipo, !todosOn); }}
                                         >
                                           {todosOn ? "Desmarcar todos" : "Marcar todos"}
                                         </Button>
@@ -1908,7 +2020,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                                           <TableBody>
                                             {linhas.slice(0, 200).map(({ d, i }) => (
                                               <TableRow key={i}>
-                                                <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(i, e.target.checked)} /></TableCell>
+                                                <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(loteAtual.id, i, e.target.checked)} /></TableCell>
                                                 <TableCell className="max-w-[380px] truncate" title={d.descricao}>{d.descricao}</TableCell>
                                                 <TableCell className="text-xs whitespace-nowrap">{formatBefore(d)}</TableCell>
                                                 <TableCell className="text-xs whitespace-nowrap">{formatAfter(d)}</TableCell>
@@ -1932,28 +2044,49 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                   );
                 })()}
 
-                {step === 3 && diffs && (
+                {step === 3 && lotes.length > 0 && (
                   <div className="space-y-4">
-                    <Card>
-                      <CardContent className="pt-6 space-y-3">
-                        <div className="text-sm text-muted-foreground">Resumo do que será aplicado:</div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                          {grupos.map((g) => {
-                            const n = diffs.filter((d) => d.tipo === g.tipo && d.apply).length;
-                            if (!n) return null;
-                            return (
-                              <div key={g.tipo} className="rounded-md border p-2 flex items-center justify-between">
-                                <Badge className={g.cor + " border-none"}>{g.label}</Badge>
-                                <span className="font-semibold tabular-nums">{n}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Data de corte: <span className="font-medium text-foreground">{format(parseISO(dataCorte), "dd/MM/yyyy")}</span> · Arquivo: <span className="font-medium text-foreground">{arquivoNome || "—"}</span>
-                        </div>
-                      </CardContent>
-                    </Card>
+                    {lotes.length > 1 && (
+                      <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                        As {lotes.length} revisões serão aplicadas em sequência, na ordem listada. Cada uma vira uma entrada própria no histórico. Itens "novos" duplicados por <span className="font-mono">uid_mpp</span> de lotes anteriores são ignorados automaticamente.
+                      </div>
+                    )}
+
+                    {lotes.map((l, idx) => {
+                      const aplicar = l.diffs.filter((d) => d.apply);
+                      return (
+                        <Card key={l.id}>
+                          <CardHeader className="py-3">
+                            <CardTitle className="text-sm flex items-center justify-between">
+                              <span className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-muted-foreground">#{idx + 1}</span>
+                                <span className="truncate max-w-[420px]" title={l.arquivoNome}>{l.arquivoNome}</span>
+                              </span>
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {aplicar.length} de {l.diffs.length} marcadas · corte {format(parseISO(l.dataCorte), "dd/MM/yyyy")}
+                              </span>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-0 pb-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              {grupos.map((g) => {
+                                const n = aplicar.filter((d) => d.tipo === g.tipo).length;
+                                if (!n) return null;
+                                return (
+                                  <div key={g.tipo} className="rounded-md border p-2 flex items-center justify-between">
+                                    <Badge className={g.cor + " border-none"}>{g.label}</Badge>
+                                    <span className="font-semibold tabular-nums">{n}</span>
+                                  </div>
+                                );
+                              })}
+                              {aplicar.length === 0 && (
+                                <div className="col-span-full text-xs text-muted-foreground">Nenhuma mudança marcada — esta revisão será registrada vazia.</div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
 
                     <Card>
                       <CardContent className="pt-6 space-y-3">
@@ -1961,36 +2094,48 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           <Switch checked={atualizarPct} onCheckedChange={setAtualizarPct} id="att-pct" />
                           <Label htmlFor="att-pct" className="cursor-pointer text-sm font-normal leading-snug">
                             Atualizar % realizado pelo PercentComplete do XML
-                            <div className="text-xs text-muted-foreground mt-0.5">Nunca rebaixa um lançamento manual maior.</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">Aplica a todas as revisões deste lote. Nunca rebaixa um lançamento manual maior.</div>
                           </Label>
                         </div>
                         <div>
-                          <Label>Observações (opcional)</Label>
-                          <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Ex.: revisão pós reunião semanal" />
+                          <Label>Observações (opcional, aplicadas a todas)</Label>
+                          <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Ex.: revisões pós reunião mensal" />
                         </div>
                       </CardContent>
                     </Card>
+
+                    {importProgress && (
+                      <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                        Aplicando {importProgress.atual}/{importProgress.total}: <span className="font-medium">{importProgress.nome}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
               <SheetFooter className="mt-4 flex-row justify-between sm:justify-between">
-                <Button variant="ghost" disabled={step === 1} onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}>
+                <Button variant="ghost" disabled={step === 1 || importing} onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}>
                   Voltar
                 </Button>
                 {step < 3 ? (
                   <Button
-                    disabled={(step === 1 && !diffs) || (step === 2 && (!diffs || diffs.length === 0))}
+                    disabled={lotes.length === 0 || (step === 2 && lotes.every((l) => l.diffs.length === 0))}
                     onClick={() => setStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}
                   >
                     Avançar
                   </Button>
                 ) : (
-                  <Button disabled={!diffs || diffs.filter((d) => d.apply).length === 0 || importing} onClick={confirmar}>
-                    {importing ? "Aplicando…" : "Confirmar revisão"}
+                  <Button
+                    disabled={lotes.length === 0 || lotes.reduce((a, l) => a + l.diffs.filter((d) => d.apply).length, 0) === 0 || importing}
+                    onClick={confirmar}
+                  >
+                    {importing
+                      ? (importProgress ? `Aplicando ${importProgress.atual}/${importProgress.total}…` : "Aplicando…")
+                      : (lotes.length > 1 ? `Confirmar ${lotes.length} revisões` : "Confirmar revisão")}
                   </Button>
                 )}
               </SheetFooter>
+
             </SheetContent>
           </Sheet>
         </CardContent>

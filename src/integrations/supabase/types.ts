@@ -450,6 +450,7 @@ export type Database = {
           observacoes: string | null
           outras_retencoes: number
           pdf_url: string | null
+          status: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj: string | null
           tomador_nome: string | null
           updated_at: string
@@ -473,6 +474,7 @@ export type Database = {
           observacoes?: string | null
           outras_retencoes?: number
           pdf_url?: string | null
+          status?: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj?: string | null
           tomador_nome?: string | null
           updated_at?: string
@@ -496,6 +498,7 @@ export type Database = {
           observacoes?: string | null
           outras_retencoes?: number
           pdf_url?: string | null
+          status?: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj?: string | null
           tomador_nome?: string | null
           updated_at?: string
@@ -656,6 +659,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "recebimentos_nota_fiscal_id_fkey"
+            columns: ["nota_fiscal_id"]
+            isOneToOne: false
+            referencedRelation: "vw_nf_saldo"
+            referencedColumns: ["nota_fiscal_id"]
+          },
+          {
             foreignKeyName: "recebimentos_obra_id_fkey"
             columns: ["obra_id"]
             isOneToOne: false
@@ -666,19 +676,55 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      vw_nf_saldo: {
+        Row: {
+          nota_fiscal_id: string | null
+          numero: string | null
+          obra_id: string | null
+          saldo_aberto: number | null
+          total_recebido: number | null
+          valor_liquido: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notas_fiscais_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       [_ in never]: never
     }
     Enums: {
-      medicao_status: "rascunho" | "enviada" | "aprovada" | "rejeitada"
+      medicao_status:
+        | "rascunho"
+        | "enviada"
+        | "aprovada"
+        | "rejeitada"
+        | "em_revisao"
+        | "faturada"
+        | "cancelada"
+      nf_status:
+        | "rascunho"
+        | "emitida"
+        | "enviada"
+        | "aprovada_cliente"
+        | "recebida"
+        | "cancelada"
       recebimento_status:
         | "previsto"
         | "a_receber"
         | "pago"
         | "atrasado"
         | "antecipado"
+        | "parcial"
+        | "recebido"
+        | "inadimplente"
+        | "cancelado"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -806,13 +852,33 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      medicao_status: ["rascunho", "enviada", "aprovada", "rejeitada"],
+      medicao_status: [
+        "rascunho",
+        "enviada",
+        "aprovada",
+        "rejeitada",
+        "em_revisao",
+        "faturada",
+        "cancelada",
+      ],
+      nf_status: [
+        "rascunho",
+        "emitida",
+        "enviada",
+        "aprovada_cliente",
+        "recebida",
+        "cancelada",
+      ],
       recebimento_status: [
         "previsto",
         "a_receber",
         "pago",
         "atrasado",
         "antecipado",
+        "parcial",
+        "recebido",
+        "inadimplente",
+        "cancelado",
       ],
     },
   },

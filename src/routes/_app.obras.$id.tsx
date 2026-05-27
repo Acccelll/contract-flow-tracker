@@ -157,23 +157,23 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
   const valorContrato = Number(obra.valor_contrato);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
-  const somaCusto = itens.reduce((a, i) => a + Number(i.custo || 0), 0);
+  // Custo "orçado" = custo_baseline (congelado na 1ª importação) com fallback no custo atual.
+  const custoItem = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+  const somaCusto = itens.reduce((a, i) => a + custoItem(i), 0);
   const total = valorContrato > 0 && somaCusto > 0
     ? (somaCusto / valorContrato) * 100
     : itens.reduce((a, i) => a + Number(i.percentual_previsto || 0), 0);
   const totalDiffReais = valorContrato - somaCusto;
 
-  // % realizado global: soma(custo * pctReal) / soma(custo). Folhas com custo>0.
+  // % realizado global: soma(custoBaseline * pctReal) / valorContrato (denominador fixo).
   const somaExec = itens.reduce((a, i) => {
-    const custo = Number(i.custo || 0);
+    const custo = custoItem(i);
     const base = custo > 0 ? custo : (Number(i.percentual_previsto || 0) / 100) * valorContrato;
     const pctReal = Number(i.percentual_realizado || 0);
     return a + (base * pctReal) / 100;
   }, 0);
-  const baseTotal = itens.reduce((a, i) => {
-    const custo = Number(i.custo || 0);
-    return a + (custo > 0 ? custo : (Number(i.percentual_previsto || 0) / 100) * valorContrato);
-  }, 0);
+  // Total exibido é sempre o valor do contrato — é o universo fixo da obra.
+  const baseTotal = valorContrato;
   const pctRealizadoTotal = baseTotal > 0 ? (somaExec / baseTotal) * 100 : 0;
 
   async function save(e: React.FormEvent) {
@@ -267,6 +267,11 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
           </div>
           <p className="text-xs text-muted-foreground mt-1">
             Executado: {brl(somaExec)} de {brl(baseTotal)}
+            {Math.abs(totalDiffReais) > Math.max(1, valorContrato * 0.005) && (
+              <span className="ml-2 text-amber-600">
+                · Cronograma cobre {total.toFixed(1)}% do contrato ({brl(totalDiffReais)} {totalDiffReais > 0 ? "não orçados" : "acima do contrato"})
+              </span>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
@@ -383,7 +388,7 @@ function buildTree(itens: any[]): CronoNode[] {
 
 function aggregate(n: CronoNode, valorContrato: number): { custo: number; pct: number; executado: number; base: number; inicio?: string; fim?: string } {
   const leafCompute = (item: any) => {
-    const custo = Number(item.custo || 0);
+    const custo = Number(item.custo_baseline ?? item.custo ?? 0);
     const pct = Number(item.percentual_previsto || 0);
     const base = custo > 0 ? custo : (pct / 100) * valorContrato;
     const pctReal = Number(item.percentual_realizado || 0);
@@ -1402,6 +1407,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           data_fim: d.fim_novo!,
           ordem: ordemNext++,
           custo: Number((d.custo_novo || 0).toFixed(2)),
+          custo_baseline: Number((d.custo_novo || 0).toFixed(2)),
           percentual_previsto: 0,
           percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
           uid_mpp: d.uid || null,
@@ -1481,19 +1487,21 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
         itensRevisao.push(log);
       }
 
-      // 3) Recalcular percentual_previsto proporcional ao custo entre todos ativos
+      // 3) Recalcular percentual_previsto proporcional ao custo_baseline entre todos ativos
+      //    (usa baseline para não "dançar" toda semana com os custos remanescentes do XML).
       const { data: vivos } = await supabase
         .from("cronograma_itens")
-        .select("id, custo, percentual_previsto")
+        .select("id, custo, custo_baseline, percentual_previsto")
         .eq("obra_id", obraId)
         .eq("ativo", true);
-      const totalCusto = (vivos ?? []).reduce((a, i) => a + Number(i.custo || 0), 0);
+      const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+      const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
       if (totalCusto > 0) {
         await Promise.all(
           (vivos ?? []).map((i) =>
             supabase
               .from("cronograma_itens")
-              .update({ percentual_previsto: Number(((Number(i.custo || 0) / totalCusto) * 100).toFixed(6)) })
+              .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
               .eq("id", i.id),
           ),
         );

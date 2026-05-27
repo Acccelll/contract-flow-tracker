@@ -19,7 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { brl, calcularVencimento } from "@/lib/billing";
 import { addDays, format, parseISO, differenceInCalendarDays } from "date-fns";
-import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/mpp";
+import { parseMppXml, parentChain as mppParentChain, isMppBinary, type MppTask } from "@/lib/mpp";
+import { MppNotSupportedDialog } from "@/components/import/MppNotSupportedDialog";
 import { Switch } from "@/components/ui/switch";
 import { AditivosTab } from "@/components/obra/AditivosTab";
 import { HistoricoTab } from "@/components/obra/HistoricoTab";

@@ -121,13 +121,15 @@ function ObraDetail() {
       </div>
 
       <Tabs defaultValue="previsao">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="previsao">Previsão</TabsTrigger>
           <TabsTrigger value="cronograma">Cronograma</TabsTrigger>
           <TabsTrigger value="medicoes">Medições</TabsTrigger>
           <TabsTrigger value="nfs">Faturamento</TabsTrigger>
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
+          <TabsTrigger value="aditivos">Aditivos</TabsTrigger>
           <TabsTrigger value="revisoes">Revisões</TabsTrigger>
+          <TabsTrigger value="historico">Histórico</TabsTrigger>
         </TabsList>
 
         <TabsContent value="previsao"><PrevisaoTab obra={obra} crono={crono ?? []} receb={receb ?? []} nfs={nfs ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>

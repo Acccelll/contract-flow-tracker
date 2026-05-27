@@ -436,6 +436,8 @@ function CronogramaImporter() {
       try {
         const text = String(ev.target?.result ?? "");
         const { titulo, tasks } = parseMppXml(text);
+        const rep = validateMpp(tasks, valorContrato);
+        setReport(rep);
         setTitulo(titulo ?? "");
         setTasks(tasks);
         // pré-seleciona folhas (incluindo marcos de 0 dias — preserva ART etc.)
@@ -443,9 +445,12 @@ function CronogramaImporter() {
         tasks.forEach((t) => { if (!t.hasChildren) initSel[t.uid] = true; });
         setSelected(initSel);
         setCollapsed(new Set());
-        toast.success(`${tasks.length} tarefas detectadas`);
+        if (rep.errors.length) toast.error(`XML com ${rep.errors.length} erro(s) — veja painel`);
+        else if (rep.warnings.length) toast.warning(`${tasks.length} tarefas, ${rep.warnings.length} aviso(s)`);
+        else toast.success(`${tasks.length} tarefas detectadas (${rep.stats.folhas} folhas)`);
       } catch (err: any) {
         toast.error(`Erro ao ler XML: ${err.message}`);
+        setReport({ ok: false, errors: [String(err.message)], warnings: [], stats: { tarefasLidas: 0, folhas: 0, custoTotal: 0, percentualMedio: 0 } });
       }
     };
     reader.readAsText(file);

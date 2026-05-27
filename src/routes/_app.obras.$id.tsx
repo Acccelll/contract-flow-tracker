@@ -1281,27 +1281,35 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setArquivoNome(file.name);
-    setDiffs(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const text = String(ev.target?.result ?? "");
-        const { tasks } = parseMppXml(text);
-        const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
-        setTasksXml(tasks);
-        const d = computeDiff(leaves, tasks, crono ?? []);
-        setDiffs(d);
-        const n = d.filter((x) => x.tipo === "novo").length;
-        const dt = d.filter((x) => x.tipo === "data").length;
-        const pc = d.filter((x) => x.tipo === "pct").length;
-        const rm = d.filter((x) => x.tipo === "removido").length;
-        toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
-      } catch (err: any) {
-        toast.error(`Erro ao ler XML: ${err.message}`);
+    isMppBinary(file).then((isBin) => {
+      if (isBin) {
+        console.info("mpp_upload_attempt");
+        setMppDialogOpen(true);
+        e.target.value = "";
+        return;
       }
-    };
-    reader.readAsText(file);
+      setArquivoNome(file.name);
+      setDiffs(null);
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const text = String(ev.target?.result ?? "");
+          const { tasks } = parseMppXml(text);
+          const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
+          setTasksXml(tasks);
+          const d = computeDiff(leaves, tasks, crono ?? []);
+          setDiffs(d);
+          const n = d.filter((x) => x.tipo === "novo").length;
+          const dt = d.filter((x) => x.tipo === "data").length;
+          const pc = d.filter((x) => x.tipo === "pct").length;
+          const rm = d.filter((x) => x.tipo === "removido").length;
+          toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
+        } catch (err: any) {
+          toast.error(`Erro ao ler XML: ${err.message}`);
+        }
+      };
+      reader.readAsText(file);
+    });
   }
 
   // Diff: casa por uid_mpp, com fallback (wbs+nome) — usado para itens importados antes desta feature.

@@ -281,6 +281,7 @@ type MppTask = {
   parentUid?: string;
   hasChildren: boolean;
   custo: number;
+  percentComplete?: number;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {

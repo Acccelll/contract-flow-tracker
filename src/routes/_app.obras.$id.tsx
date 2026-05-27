@@ -1260,6 +1260,24 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
   const [importing, setImporting] = useState(false);
   const [mppDialogOpen, setMppDialogOpen] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [filtroDiff, setFiltroDiff] = useState("");
+  const [tiposVisiveis, setTiposVisiveis] = useState<Set<DiffRow["tipo"]> | null>(null);
+  const [verTodasRev, setVerTodasRev] = useState(false);
+  const [atrasosAbertos, setAtrasosAbertos] = useState(false);
+  const [atrasosLimite, setAtrasosLimite] = useState(50);
+  const [atrasosFiltro, setAtrasosFiltro] = useState("");
+  const [atrasosMin, setAtrasosMin] = useState<string>("0");
+
+  function resetSheet() {
+    setStep(1);
+    setDiffs(null);
+    setTasksXml([]);
+    setArquivoNome("");
+    setObs("");
+    setFiltroDiff("");
+    setTiposVisiveis(null);
+  }
 
   const obraId = obra.id;
   const valorContrato = Number(obra.valor_contrato || 0);

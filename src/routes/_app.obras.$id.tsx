@@ -1457,9 +1457,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           log.percentual_realizado_anterior = d.pct_antes;
           log.percentual_realizado_novo = d.pct_novo;
         } else if (d.tipo === "custo") {
-          update.custo = Number((d.custo_novo || 0).toFixed(2));
-          log.custo_anterior = d.custo_antes;
-          log.custo_novo = d.custo_novo;
+          // Onda 1.3: XML não altera mais custo de itens existentes — branch mantido apenas por compat.
         } else if (d.tipo === "removido") {
           update.ativo = false;
         } else if (d.tipo === "restaurado") {

@@ -134,6 +134,18 @@ function ObraDetail() {
         </TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
+        <TabsContent value="revisoes">
+          <RevisoesTab
+            obra={obra}
+            crono={crono ?? []}
+            revisoes={revisoes ?? []}
+            onChange={() => {
+              qc.invalidateQueries({ queryKey: ["crono", id] });
+              qc.invalidateQueries({ queryKey: ["revisoes", id] });
+              qc.invalidateQueries({ queryKey: ["receb", id] });
+            }}
+          />
+        </TabsContent>
       </Tabs>
 
     </div>

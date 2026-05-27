@@ -98,6 +98,9 @@ function ObraDetail() {
               qc.invalidateQueries({ queryKey: ["crono", id] });
               qc.invalidateQueries({ queryKey: ["revisoes", id] });
               qc.invalidateQueries({ queryKey: ["receb", id] });
+              qc.invalidateQueries({ queryKey: ["nfs", id] });
+              qc.invalidateQueries({ queryKey: ["medicoes", id] });
+              qc.invalidateQueries({ queryKey: ["itens_medicao", id] });
               qc.invalidateQueries({ queryKey: ["obra_valores", id] });
             }}
           />

@@ -1658,6 +1658,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
             <div className="text-xs text-muted-foreground mt-1">XML do MS Project</div>
           </div>
           <Sheet open={open} onOpenChange={setOpen}>
+            <MppNotSupportedDialog open={mppDialogOpen} onOpenChange={setMppDialogOpen} />
             <SheetTrigger asChild><Button><Upload className="h-4 w-4 mr-2" />Nova revisão</Button></SheetTrigger>
             <SheetContent side="right" className="w-[95vw] sm:max-w-[860px] overflow-y-auto">
               <SheetHeader><SheetTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Importar revisão semanal</SheetTitle></SheetHeader>

@@ -417,6 +417,7 @@ function CronogramaImporter() {
   const [ponderacao, setPonderacao] = useState<"custo" | "dias">("custo");
   const [done, setDone] = useState<number | null>(null);
   const [report, setReport] = useState<MppReport | null>(null);
+  const [mppDialogOpen, setMppDialogOpen] = useState(false);
 
 
   const { data: obras } = useQuery({

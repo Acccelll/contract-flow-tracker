@@ -23,6 +23,7 @@ import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/
 import { Switch } from "@/components/ui/switch";
 import { AditivosTab } from "@/components/obra/AditivosTab";
 import { HistoricoTab } from "@/components/obra/HistoricoTab";
+import { CompararRevisoesTab } from "@/components/obra/CompararRevisoesTab";
 
 export const Route = createFileRoute("/_app/obras/$id")({ component: ObraDetail });
 
@@ -129,6 +130,7 @@ function ObraDetail() {
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
           <TabsTrigger value="aditivos">Aditivos</TabsTrigger>
           <TabsTrigger value="revisoes">Revisões</TabsTrigger>
+          <TabsTrigger value="comparar">Comparar</TabsTrigger>
           <TabsTrigger value="historico">Histórico</TabsTrigger>
         </TabsList>
 
@@ -163,6 +165,7 @@ function ObraDetail() {
             }}
           />
         </TabsContent>
+        <TabsContent value="comparar"><CompararRevisoesTab obraId={id} /></TabsContent>
         <TabsContent value="historico"><HistoricoTab obraId={id} /></TabsContent>
       </Tabs>
 

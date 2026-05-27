@@ -1924,24 +1924,38 @@ function LimparImportadosButton({
 
           <div className="rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
             <p className="font-medium text-foreground">Não serão alterados:</p>
-            <p>Contrato, aditivos, medições, notas fiscais, recebimentos já efetivados e logs de auditoria.</p>
+            <p>Contrato, aditivos e logs de auditoria.</p>
           </div>
 
-          {bloqueado && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
-              <p className="font-medium">Limpeza bloqueada</p>
-              <p className="mt-1">
-                Existem registros financeiros desta obra que impedem a limpeza:
-                {temMedicoes && <span className="block">• medições</span>}
-                {temNfs && <span className="block">• notas fiscais</span>}
-                {temRecebimentos && <span className="block">• recebimentos já efetivados</span>}
-              </p>
-              <p className="mt-1">
-                Cancele/remova esses registros antes para evitar referências órfãs.
-              </p>
+          {temFinanceiro && (
+            <div className={`rounded-md border p-3 ${incluirFaturamento ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"}`}>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={incluirFaturamento}
+                  onChange={(e) => setIncluirFaturamento(e.target.checked)}
+                  className="mt-1"
+                  disabled={loading}
+                />
+                <div className="text-sm">
+                  <p className="font-medium">
+                    Também remover medições, notas fiscais e recebimentos
+                  </p>
+                  <p className="mt-1">
+                    Esta obra possui registros financeiros:
+                    {temMedicoes && <span className="block">• medições</span>}
+                    {temNfs && <span className="block">• notas fiscais</span>}
+                    {temRecebimentos && <span className="block">• recebimentos já efetivados</span>}
+                  </p>
+                  <p className="mt-1">
+                    {incluirFaturamento
+                      ? "Tudo será apagado em cascata — inclusive valores já recebidos."
+                      : "Marque para apagar tudo em cascata, ou cancele para preservar o histórico financeiro."}
+                  </p>
+                </div>
+              </label>
             </div>
           )}
-
 
           <div>
             <Label htmlFor="confirm-limpar" className="text-xs">

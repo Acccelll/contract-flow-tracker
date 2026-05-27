@@ -329,6 +329,60 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
   return { titulo, tasks: raw };
 }
 
+type MppReport = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  stats: {
+    tarefasLidas: number;
+    folhas: number;
+    custoTotal: number;
+    percentualMedio: number;
+  };
+};
+
+function validateMpp(tasks: MppTask[], valorContrato?: number | null): MppReport {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const folhas = tasks.filter((t) => !t.hasChildren);
+  const folhasComData = folhas.filter((t) => t.start && t.finish);
+  const custoTotal = folhas.reduce((a, t) => a + (t.custo || 0), 0);
+  const pctMedio = folhas.length
+    ? folhas.reduce((a, t) => a + ((t as any).percentComplete || 0), 0) / folhas.length
+    : 0;
+
+  if (tasks.length === 0) errors.push("Nenhuma tarefa encontrada no XML.");
+  if (folhas.length === 0) errors.push("Nenhuma tarefa-folha (executável) detectada.");
+  if (folhas.length > 0 && custoTotal === 0)
+    warnings.push("Custo total das folhas é zero — verifique se o XML traz <Cost> ou <FixedCost>.");
+  if (folhasComData.length < folhas.length)
+    warnings.push(`${folhas.length - folhasComData.length} folha(s) sem datas serão ignoradas.`);
+  const semUid = tasks.filter((t) => !t.uid).length;
+  if (semUid > 0) errors.push(`${semUid} tarefa(s) sem UID — XML inconsistente.`);
+
+  // Heurística "Cost remanescente": se há avanço médio significativo e custo total é baixo
+  // relativo ao contrato, MS Project pode estar exportando custo remanescente, não total.
+  if (valorContrato && valorContrato > 0 && pctMedio > 5 && custoTotal < 0.9 * Number(valorContrato)) {
+    warnings.push(
+      `Custo total (${custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) é menor que 90% do contrato e há avanço médio de ${pctMedio.toFixed(1)}%. ` +
+      "Possível custo remanescente — MS Project exporta <Cost> como remanescente quando há % concluído. Confirme antes de importar.",
+    );
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    stats: {
+      tarefasLidas: tasks.length,
+      folhas: folhas.length,
+      custoTotal,
+      percentualMedio: pctMedio,
+    },
+  };
+}
+
+
 function CronogramaImporter() {
   const [tasks, setTasks] = useState<MppTask[]>([]);
   const [titulo, setTitulo] = useState<string>("");

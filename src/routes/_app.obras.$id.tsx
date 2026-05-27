@@ -1664,8 +1664,13 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
               <div className="space-y-4 mt-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <Label>Arquivo .xml do Project</Label>
-                    <Input type="file" accept=".xml" onChange={onFile} />
+                    <div className="flex items-center justify-between">
+                      <Label>Arquivo .xml do Project</Label>
+                      <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground">
+                        Tem .mpp?
+                      </button>
+                    </div>
+                    <Input type="file" accept=".xml,.mpp" onChange={onFile} />
                   </div>
                   <div>
                     <Label>Data de corte</Label>

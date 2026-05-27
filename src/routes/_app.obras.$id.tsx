@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { createFileRoute, useParams, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -1264,6 +1264,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [filtroDiff, setFiltroDiff] = useState("");
   const [tiposVisiveis, setTiposVisiveis] = useState<Set<DiffRow["tipo"]> | null>(null);
   const [verTodasRev, setVerTodasRev] = useState(false);
+  const [revExpandida, setRevExpandida] = useState<string | null>(null);
   const [atrasosAbertos, setAtrasosAbertos] = useState(false);
   const [atrasosLimite, setAtrasosLimite] = useState(50);
   const [atrasosFiltro, setAtrasosFiltro] = useState("");
@@ -1908,10 +1909,11 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
         </CardHeader>
         <CardContent>
           {revisoes.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Nenhuma revisão registrada ainda.</div>
+            <div className="text-sm text-muted-foreground">Nenhuma revisão registrada ainda. Clique em "Nova revisão" para importar a primeira.</div>
           ) : (
             <Table>
               <TableHeader><TableRow>
+                <TableHead className="w-8"></TableHead>
                 <TableHead className="w-12">#</TableHead>
                 <TableHead>Data de corte</TableHead>
                 <TableHead>Arquivo</TableHead>
@@ -1927,16 +1929,32 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                     t.alterados_pct ? `${t.alterados_pct} %` : null,
                     t.removidos ? `${t.removidos} removidas` : null,
                   ].filter(Boolean);
+                  const aberta = revExpandida === r.id;
                   return (
-                    <TableRow key={r.id}>
-                      <TableCell>{r.numero}</TableCell>
-                      <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
-                      <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground" title={`Novos ${t.novos ?? 0} · Datas ${t.alterados_data ?? 0} · % ${t.alterados_pct ?? 0} · Removidos ${t.removidos ?? 0}`}>
-                        {chips.length ? chips.join(" · ") : "sem mudanças"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
-                    </TableRow>
+                    <Fragment key={r.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-accent/40"
+                        onClick={() => setRevExpandida((cur) => (cur === r.id ? null : r.id))}
+                      >
+                        <TableCell>
+                          {aberta ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                        </TableCell>
+                        <TableCell>{r.numero}</TableCell>
+                        <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
+                        <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground" title={`Novos ${t.novos ?? 0} · Datas ${t.alterados_data ?? 0} · % ${t.alterados_pct ?? 0} · Removidos ${t.removidos ?? 0}`}>
+                          {chips.length ? chips.join(" · ") : "sem mudanças"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
+                      </TableRow>
+                      {aberta && (
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableCell colSpan={6} className="p-0">
+                            <RevisaoDetalhes revisaoId={r.id} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
                   );
                 })}
               </TableBody>
@@ -1944,90 +1962,10 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           )}
         </CardContent>
       </Card>
-
-      {/* Tarefas com mudança de data — colapsável */}
-      {atrasos.length > 0 && (
-        <Collapsible open={atrasosAbertos} onOpenChange={setAtrasosAbertos}>
-          <Card>
-            <CollapsibleTrigger asChild>
-              <CardHeader className="cursor-pointer hover:bg-accent/40 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  {atrasosAbertos ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  <AlertCircle className="h-4 w-4 text-amber-500" />
-                  Tarefas com mudança de data vs. baseline
-                  <Badge variant="secondary" className="ml-1">{atrasos.length}</Badge>
-                </CardTitle>
-                <span className="text-xs text-muted-foreground">
-                  {atrasados.length} atrasada(s) · maior Δ {atrasoMax}d
-                </span>
-              </CardHeader>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap gap-2 items-center">
-                  <Input
-                    placeholder="Buscar tarefa…"
-                    value={atrasosFiltro}
-                    onChange={(e) => setAtrasosFiltro(e.target.value)}
-                    className="h-9 max-w-xs"
-                  />
-                  <Select value={atrasosMin} onValueChange={setAtrasosMin}>
-                    <SelectTrigger className="h-9 w-[180px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">Todas as mudanças</SelectItem>
-                      <SelectItem value="1">Δ ≥ 1 dia</SelectItem>
-                      <SelectItem value="3">Δ ≥ 3 dias</SelectItem>
-                      <SelectItem value="7">Δ ≥ 7 dias</SelectItem>
-                      <SelectItem value="15">Δ ≥ 15 dias</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {(() => {
-                  const minN = Number(atrasosMin) || 0;
-                  const filtradas = atrasos
-                    .filter((a) => Math.abs(a.delta) >= minN)
-                    .filter((a) => !atrasosFiltro || a.descricao.toLowerCase().includes(atrasosFiltro.toLowerCase()))
-                    .sort((a, b) => b.delta - a.delta);
-                  const visiveis = filtradas.slice(0, atrasosLimite);
-                  return (
-                    <>
-                      <Table>
-                        <TableHeader><TableRow>
-                          <TableHead>Tarefa</TableHead>
-                          <TableHead>Fim baseline</TableHead>
-                          <TableHead>Fim atual</TableHead>
-                          <TableHead className="text-right">Δ dias</TableHead>
-                        </TableRow></TableHeader>
-                        <TableBody>
-                          {visiveis.map((a) => (
-                            <TableRow key={a.id}>
-                              <TableCell className="max-w-[420px] truncate" title={a.descricao}>{a.descricao}</TableCell>
-                              <TableCell>{format(parseISO(a.baseline), "dd/MM/yy")}</TableCell>
-                              <TableCell>{format(parseISO(a.atual), "dd/MM/yy")}</TableCell>
-                              <TableCell className="text-right">
-                                <Badge variant={a.delta > 0 ? "destructive" : "secondary"}>{a.delta > 0 ? `+${a.delta}` : a.delta}</Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>Mostrando {visiveis.length} de {filtradas.length}</span>
-                        {filtradas.length > atrasosLimite && (
-                          <Button variant="ghost" size="sm" onClick={() => setAtrasosLimite((n) => n + 50)}>Mostrar mais</Button>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
-              </CardContent>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
-      )}
     </div>
   );
 }
+
 
 
 function formatBefore(d: DiffRow): string {
@@ -2228,5 +2166,136 @@ function LimparImportadosButton({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function RevisaoDetalhes({ revisaoId }: { revisaoId: string }) {
+  const [filtro, setFiltro] = useState("");
+  const [tipo, setTipo] = useState<string>("todos");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["revisao_detalhes", revisaoId],
+    queryFn: async () =>
+      (
+        await supabase
+          .from("cronograma_item_revisoes")
+          .select(
+            "id, descricao_item, tipo_mudanca, data_inicio_anterior, data_inicio_novo, data_fim_anterior, data_fim_novo, percentual_realizado_anterior, percentual_realizado_novo, custo_anterior, custo_novo",
+          )
+          .eq("revisao_id", revisaoId)
+      ).data ?? [],
+  });
+
+  if (isLoading) {
+    return <div className="px-4 py-3 text-xs text-muted-foreground">Carregando mudanças…</div>;
+  }
+  if (!data || data.length === 0) {
+    return <div className="px-4 py-3 text-xs text-muted-foreground">Nenhuma mudança registrada nesta revisão.</div>;
+  }
+
+  const tipos = Array.from(new Set(data.map((d) => d.tipo_mudanca))).sort();
+  const filtradas = data
+    .filter((d) => tipo === "todos" || d.tipo_mudanca === tipo)
+    .filter((d) => !filtro || (d.descricao_item ?? "").toLowerCase().includes(filtro.toLowerCase()));
+
+  function fmtDate(s?: string | null) {
+    if (!s) return "—";
+    try { return format(parseISO(s), "dd/MM/yy"); } catch { return s; }
+  }
+  function deltaDias(antes?: string | null, depois?: string | null) {
+    if (!antes || !depois) return null;
+    try { return differenceInCalendarDays(parseISO(depois), parseISO(antes)); } catch { return null; }
+  }
+  function antesDepois(d: NonNullable<typeof data>[number]) {
+    switch (d.tipo_mudanca) {
+      case "novo":
+        return { antes: "—", depois: `${fmtDate(d.data_inicio_novo)} → ${fmtDate(d.data_fim_novo)}` };
+      case "removido":
+        return { antes: "(ativo)", depois: "(inativo)" };
+      case "restaurado":
+        return { antes: "(inativo)", depois: "(ativo)" };
+      case "data": {
+        const d1 = deltaDias(d.data_fim_anterior, d.data_fim_novo);
+        return {
+          antes: `${fmtDate(d.data_inicio_anterior)} → ${fmtDate(d.data_fim_anterior)}`,
+          depois: `${fmtDate(d.data_inicio_novo)} → ${fmtDate(d.data_fim_novo)}`,
+          delta: d1,
+        };
+      }
+      case "pct":
+        return {
+          antes: `${Number(d.percentual_realizado_anterior ?? 0).toFixed(1)}%`,
+          depois: `${Number(d.percentual_realizado_novo ?? 0).toFixed(1)}%`,
+        };
+      case "custo":
+        return { antes: brl(Number(d.custo_anterior ?? 0)), depois: brl(Number(d.custo_novo ?? 0)) };
+      default:
+        return { antes: "—", depois: "—" };
+    }
+  }
+  const tipoCor: Record<string, string> = {
+    novo: "bg-blue-500/15 text-blue-700",
+    data: "bg-amber-500/15 text-amber-700",
+    pct: "bg-emerald-500/15 text-emerald-700",
+    custo: "bg-purple-500/15 text-purple-700",
+    removido: "bg-red-500/15 text-red-700",
+    restaurado: "bg-sky-500/15 text-sky-700",
+  };
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Buscar tarefa…"
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+          className="h-8 max-w-xs"
+        />
+        <Select value={tipo} onValueChange={setTipo}>
+          <SelectTrigger className="h-8 w-[180px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos os tipos</SelectItem>
+            {tipos.map((t) => (
+              <SelectItem key={t} value={t}>{t}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground ml-auto">{filtradas.length} de {data.length}</span>
+      </div>
+      <div className="rounded-md border bg-background overflow-hidden">
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="w-[110px]">Tipo</TableHead>
+            <TableHead>Tarefa</TableHead>
+            <TableHead>Antes</TableHead>
+            <TableHead>Depois</TableHead>
+            <TableHead className="text-right w-[80px]">Δ</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {filtradas.slice(0, 200).map((d) => {
+              const ad = antesDepois(d);
+              return (
+                <TableRow key={d.id}>
+                  <TableCell>
+                    <Badge className={(tipoCor[d.tipo_mudanca] ?? "bg-muted text-muted-foreground") + " border-none"}>{d.tipo_mudanca}</Badge>
+                  </TableCell>
+                  <TableCell className="max-w-[420px] truncate" title={d.descricao_item ?? ""}>{d.descricao_item ?? "—"}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap">{ad.antes}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap">{ad.depois}</TableCell>
+                  <TableCell className="text-right text-xs">
+                    {"delta" in ad && ad.delta != null && ad.delta !== 0 ? (
+                      <Badge variant={ad.delta > 0 ? "destructive" : "secondary"}>{ad.delta > 0 ? `+${ad.delta}` : ad.delta}d</Badge>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+        {filtradas.length > 200 && (
+          <div className="px-3 py-2 text-xs text-muted-foreground">Mostrando 200 de {filtradas.length}. Use a busca para refinar.</div>
+        )}
+      </div>
+    </div>
   );
 }

@@ -67,6 +67,10 @@ function ObraDetail() {
     queryKey: ["revisoes", id],
     queryFn: async () => (await supabase.from("cronograma_revisoes").select("*").eq("obra_id", id).order("numero", { ascending: false })).data ?? [],
   });
+  const { data: valores } = useQuery({
+    queryKey: ["obra_valores", id],
+    queryFn: async () => (await (supabase as any).from("vw_obra_valores").select("*").eq("obra_id", id).maybeSingle()).data,
+  });
 
   if (!obra) return <div className="p-8 text-muted-foreground">Carregando…</div>;
 

@@ -1176,3 +1176,559 @@ function PrevisaoTab({ obra, crono, receb, nfs, onChange }: { obra: any; crono: 
     </div>
   );
 }
+
+// =================== Revisões semanais do cronograma (MS Project XML) ===================
+
+type DiffRow = {
+  tipo: "novo" | "data" | "pct" | "custo" | "removido" | "restaurado";
+  itemId?: string;
+  uid: string;
+  descricao: string;
+  inicio_antes?: string | null;
+  inicio_novo?: string | null;
+  fim_antes?: string | null;
+  fim_novo?: string | null;
+  pct_antes?: number | null;
+  pct_novo?: number | null;
+  custo_antes?: number | null;
+  custo_novo?: number | null;
+  task?: MppTask;
+  apply: boolean;
+};
+
+function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: any[]; revisoes: any[]; onChange: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [arquivoNome, setArquivoNome] = useState<string>("");
+  const [dataCorte, setDataCorte] = useState<string>(format(new Date(), "yyyy-MM-dd"));
+  const [obs, setObs] = useState<string>("");
+  const [atualizarPct, setAtualizarPct] = useState<boolean>(true);
+  const [diffs, setDiffs] = useState<DiffRow[] | null>(null);
+  const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  const obraId = obra.id;
+  const valorContrato = Number(obra.valor_contrato || 0);
+
+  // Atraso por item: data_fim atual - data_fim_baseline
+  const atrasos = (crono ?? [])
+    .filter((c) => c.ativo !== false && c.data_fim_baseline && c.data_fim)
+    .map((c) => ({
+      id: c.id,
+      descricao: c.descricao,
+      baseline: c.data_fim_baseline as string,
+      atual: c.data_fim as string,
+      delta: differenceInCalendarDays(parseISO(c.data_fim), parseISO(c.data_fim_baseline)),
+    }))
+    .filter((a) => a.delta !== 0);
+  const atrasados = atrasos.filter((a) => a.delta > 0);
+  const atrasoMax = atrasos.reduce((m, a) => Math.max(m, a.delta), 0);
+
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setArquivoNome(file.name);
+    setDiffs(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = String(ev.target?.result ?? "");
+        const { tasks } = parseMppXml(text);
+        const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
+        setTasksXml(tasks);
+        const d = computeDiff(leaves, tasks, crono ?? []);
+        setDiffs(d);
+        const n = d.filter((x) => x.tipo === "novo").length;
+        const dt = d.filter((x) => x.tipo === "data").length;
+        const pc = d.filter((x) => x.tipo === "pct").length;
+        const rm = d.filter((x) => x.tipo === "removido").length;
+        toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
+      } catch (err: any) {
+        toast.error(`Erro ao ler XML: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // Diff: casa por uid_mpp, com fallback (wbs+nome) — usado para itens importados antes desta feature.
+  function computeDiff(leaves: MppTask[], allTasks: MppTask[], itens: any[]): DiffRow[] {
+    const byUid = new Map(allTasks.map((t) => [t.uid, t]));
+    const itensAtivos = itens.filter((i) => i.ativo !== false);
+    const itensInativos = itens.filter((i) => i.ativo === false);
+
+    const byItemUid = new Map<string, any>();
+    for (const i of itensAtivos) if (i.uid_mpp) byItemUid.set(String(i.uid_mpp), i);
+
+    // fallback por wbs+nome (one-shot backfill)
+    function findFallback(t: MppTask) {
+      const chain = mppParentChain(t, byUid)
+        .map((p) => (p.wbs ? `${p.wbs} ${p.name}` : p.name))
+        .join(" › ");
+      const wbsPrefix = t.wbs ? `${t.wbs} ` : "";
+      const target = (wbsPrefix + t.name + (chain ? `  ·  [${chain}]` : "")).trim();
+      return itensAtivos.find((i) => !i.uid_mpp && String(i.descricao ?? "").trim() === target);
+    }
+
+    const result: DiffRow[] = [];
+    const matched = new Set<string>();
+
+    for (const t of leaves) {
+      let item = byItemUid.get(t.uid);
+      if (!item) item = findFallback(t);
+      if (!item) {
+        // verifica se é uma tarefa que estava inativa
+        const restaurado = itensInativos.find((i) => i.uid_mpp === t.uid);
+        if (restaurado) {
+          result.push({
+            tipo: "restaurado",
+            itemId: restaurado.id,
+            uid: t.uid,
+            descricao: descricaoTarefa(t, byUid),
+            task: t,
+            apply: true,
+          });
+          matched.add(restaurado.id);
+          continue;
+        }
+        result.push({
+          tipo: "novo",
+          uid: t.uid,
+          descricao: descricaoTarefa(t, byUid),
+          inicio_novo: t.start,
+          fim_novo: t.finish,
+          pct_novo: t.percentComplete,
+          custo_novo: t.custo,
+          task: t,
+          apply: true,
+        });
+        continue;
+      }
+      matched.add(item.id);
+
+      const inicioMudou = String(item.data_inicio) !== String(t.start);
+      const fimMudou = String(item.data_fim) !== String(t.finish);
+      const pctMudou = Math.abs(Number(item.percentual_realizado || 0) - t.percentComplete) > 0.01;
+      const custoMudou = Math.abs(Number(item.custo || 0) - t.custo) > 0.005;
+
+      if (inicioMudou || fimMudou) {
+        result.push({
+          tipo: "data",
+          itemId: item.id,
+          uid: t.uid,
+          descricao: item.descricao,
+          inicio_antes: item.data_inicio,
+          inicio_novo: t.start,
+          fim_antes: item.data_fim,
+          fim_novo: t.finish,
+          task: t,
+          apply: true,
+        });
+      }
+      if (pctMudou) {
+        result.push({
+          tipo: "pct",
+          itemId: item.id,
+          uid: t.uid,
+          descricao: item.descricao,
+          pct_antes: Number(item.percentual_realizado || 0),
+          pct_novo: t.percentComplete,
+          task: t,
+          apply: true,
+        });
+      }
+      if (custoMudou) {
+        result.push({
+          tipo: "custo",
+          itemId: item.id,
+          uid: t.uid,
+          descricao: item.descricao,
+          custo_antes: Number(item.custo || 0),
+          custo_novo: t.custo,
+          task: t,
+          apply: true,
+        });
+      }
+    }
+
+    // Removidos: itens ativos que não bateram com nenhuma tarefa
+    for (const i of itensAtivos) {
+      if (matched.has(i.id)) continue;
+      result.push({
+        tipo: "removido",
+        itemId: i.id,
+        uid: i.uid_mpp ?? "",
+        descricao: i.descricao,
+        apply: true,
+      });
+    }
+
+    return result;
+  }
+
+  function descricaoTarefa(t: MppTask, byUid: Map<string, MppTask>): string {
+    const chain = mppParentChain(t, byUid)
+      .map((p) => (p.wbs ? `${p.wbs} ${p.name}` : p.name))
+      .join(" › ");
+    const wbsPrefix = t.wbs ? `${t.wbs} ` : "";
+    return wbsPrefix + t.name + (chain ? `  ·  [${chain}]` : "");
+  }
+
+  function toggleRow(idx: number, value: boolean) {
+    setDiffs((d) => d?.map((r, i) => (i === idx ? { ...r, apply: value } : r)) ?? null);
+  }
+  function toggleAll(tipo: DiffRow["tipo"], value: boolean) {
+    setDiffs((d) => d?.map((r) => (r.tipo === tipo ? { ...r, apply: value } : r)) ?? null);
+  }
+
+  async function confirmar() {
+    if (!diffs || diffs.length === 0) {
+      toast.error("Nenhuma mudança para aplicar");
+      return;
+    }
+    setImporting(true);
+    try {
+      const aplicar = diffs.filter((d) => d.apply);
+      const itensRevisao: any[] = [];
+      const itensAtivos = (crono ?? []).filter((i) => i.ativo !== false);
+      const ordemBase = itensAtivos.length;
+      let ordemNext = ordemBase;
+
+      // 1) Novos itens
+      const novos = aplicar.filter((d) => d.tipo === "novo");
+      if (novos.length) {
+        const rows = novos.map((d) => ({
+          obra_id: obraId,
+          descricao: d.descricao,
+          data_inicio: d.inicio_novo!,
+          data_fim: d.fim_novo!,
+          ordem: ordemNext++,
+          custo: Number((d.custo_novo || 0).toFixed(2)),
+          percentual_previsto: 0,
+          percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
+          uid_mpp: d.uid || null,
+          data_inicio_baseline: d.inicio_novo!,
+          data_fim_baseline: d.fim_novo!,
+          ativo: true,
+        }));
+        const { data: ins, error } = await supabase
+          .from("cronograma_itens")
+          .insert(rows)
+          .select("id, descricao, data_inicio, data_fim, custo, percentual_realizado");
+        if (error) throw error;
+        ins?.forEach((row: any) => {
+          itensRevisao.push({
+            cronograma_item_id: row.id,
+            descricao_item: row.descricao,
+            tipo_mudanca: "novo",
+            data_inicio_anterior: null, data_inicio_novo: row.data_inicio,
+            data_fim_anterior: null, data_fim_novo: row.data_fim,
+            custo_anterior: null, custo_novo: row.custo,
+            percentual_realizado_anterior: null,
+            percentual_realizado_novo: row.percentual_realizado,
+          });
+        });
+      }
+
+      // 2) Updates por item existente
+      for (const d of aplicar) {
+        if (!d.itemId) continue;
+        if (d.tipo === "novo") continue;
+
+        const item = (crono ?? []).find((i) => i.id === d.itemId);
+        const update: any = {};
+        const log: any = {
+          cronograma_item_id: d.itemId,
+          descricao_item: item?.descricao ?? d.descricao,
+          tipo_mudanca: d.tipo,
+        };
+
+        if (d.tipo === "data") {
+          update.data_inicio = d.inicio_novo;
+          update.data_fim = d.fim_novo;
+          log.data_inicio_anterior = d.inicio_antes;
+          log.data_inicio_novo = d.inicio_novo;
+          log.data_fim_anterior = d.fim_antes;
+          log.data_fim_novo = d.fim_novo;
+          // baseline só se ainda não existir
+          if (item && !item.data_inicio_baseline) update.data_inicio_baseline = d.inicio_antes;
+          if (item && !item.data_fim_baseline) update.data_fim_baseline = d.fim_antes;
+        } else if (d.tipo === "pct") {
+          if (atualizarPct) {
+            // só sobrescreve se o XML for >= ao atual (não rebaixar lançamento manual)
+            const novo = Number(d.pct_novo || 0);
+            const atual = Number(d.pct_antes || 0);
+            if (novo >= atual) update.percentual_realizado = novo;
+          }
+          log.percentual_realizado_anterior = d.pct_antes;
+          log.percentual_realizado_novo = d.pct_novo;
+        } else if (d.tipo === "custo") {
+          update.custo = Number((d.custo_novo || 0).toFixed(2));
+          log.custo_anterior = d.custo_antes;
+          log.custo_novo = d.custo_novo;
+        } else if (d.tipo === "removido") {
+          update.ativo = false;
+        } else if (d.tipo === "restaurado") {
+          update.ativo = true;
+          if (d.task) {
+            update.data_inicio = d.task.start;
+            update.data_fim = d.task.finish;
+          }
+        }
+
+        if (Object.keys(update).length) {
+          const { error } = await supabase.from("cronograma_itens").update(update).eq("id", d.itemId);
+          if (error) throw error;
+        }
+        itensRevisao.push(log);
+      }
+
+      // 3) Recalcular percentual_previsto proporcional ao custo entre todos ativos
+      const { data: vivos } = await supabase
+        .from("cronograma_itens")
+        .select("id, custo, percentual_previsto")
+        .eq("obra_id", obraId)
+        .eq("ativo", true);
+      const totalCusto = (vivos ?? []).reduce((a, i) => a + Number(i.custo || 0), 0);
+      if (totalCusto > 0) {
+        await Promise.all(
+          (vivos ?? []).map((i) =>
+            supabase
+              .from("cronograma_itens")
+              .update({ percentual_previsto: Number(((Number(i.custo || 0) / totalCusto) * 100).toFixed(6)) })
+              .eq("id", i.id),
+          ),
+        );
+      }
+
+      // 4) Cabeçalho da revisão
+      const ultimoNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
+      const totais = {
+        itens_total: tasksXml.filter((t) => !t.hasChildren).length,
+        novos: aplicar.filter((d) => d.tipo === "novo").length,
+        alterados_data: aplicar.filter((d) => d.tipo === "data").length,
+        alterados_pct: aplicar.filter((d) => d.tipo === "pct").length,
+        alterados_custo: aplicar.filter((d) => d.tipo === "custo").length,
+        removidos: aplicar.filter((d) => d.tipo === "removido").length,
+        restaurados: aplicar.filter((d) => d.tipo === "restaurado").length,
+        custo_total: tasksXml.filter((t) => !t.hasChildren).reduce((a, t) => a + (t.custo || 0), 0),
+      };
+      const { data: rev, error: revErr } = await supabase
+        .from("cronograma_revisoes")
+        .insert({
+          obra_id: obraId,
+          numero: ultimoNumero + 1,
+          data_corte: dataCorte,
+          arquivo_nome: arquivoNome || null,
+          observacoes: obs || null,
+          totais,
+        })
+        .select("id")
+        .single();
+      if (revErr) throw revErr;
+
+      // 5) Snapshots dos itens
+      if (itensRevisao.length) {
+        const rows = itensRevisao.map((r) => ({ ...r, revisao_id: rev!.id }));
+        const { error } = await supabase.from("cronograma_item_revisoes").insert(rows);
+        if (error) throw error;
+      }
+
+      toast.success(`Revisão #${ultimoNumero + 1} registrada`);
+      setOpen(false);
+      setDiffs(null);
+      setArquivoNome("");
+      setObs("");
+      onChange();
+    } catch (err: any) {
+      toast.error(err.message ?? "Erro ao aplicar revisão");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const grupos: { tipo: DiffRow["tipo"]; label: string; cor: string }[] = [
+    { tipo: "novo", label: "Novos", cor: "bg-blue-500/15 text-blue-700" },
+    { tipo: "data", label: "Datas alteradas", cor: "bg-amber-500/15 text-amber-700" },
+    { tipo: "pct", label: "% realizado", cor: "bg-emerald-500/15 text-emerald-700" },
+    { tipo: "custo", label: "Custo alterado", cor: "bg-purple-500/15 text-purple-700" },
+    { tipo: "removido", label: "Removidos", cor: "bg-red-500/15 text-red-700" },
+    { tipo: "restaurado", label: "Restaurados", cor: "bg-sky-500/15 text-sky-700" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card><CardContent className="pt-6">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Atraso máximo</div>
+          <div className="text-xl font-semibold mt-1">{atrasoMax} {atrasoMax === 1 ? "dia" : "dias"}</div>
+          <div className="text-xs text-muted-foreground mt-1">{atrasados.length} tarefa(s) atrasada(s)</div>
+        </CardContent></Card>
+        <Card><CardContent className="pt-6">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Revisões registradas</div>
+          <div className="text-xl font-semibold mt-1">{revisoes.length}</div>
+          <div className="text-xs text-muted-foreground mt-1">{revisoes[0] ? `Última: ${format(parseISO(revisoes[0].data_corte), "dd/MM/yyyy")}` : "Nenhuma ainda"}</div>
+        </CardContent></Card>
+        <Card><CardContent className="pt-6 flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Importar revisão</div>
+            <div className="text-xs text-muted-foreground mt-1">XML do MS Project</div>
+          </div>
+          <Sheet open={open} onOpenChange={setOpen}>
+            <SheetTrigger asChild><Button><Upload className="h-4 w-4 mr-2" />Nova revisão</Button></SheetTrigger>
+            <SheetContent side="right" className="w-[95vw] sm:max-w-[860px] overflow-y-auto">
+              <SheetHeader><SheetTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Importar revisão semanal</SheetTitle></SheetHeader>
+              <div className="space-y-4 mt-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label>Arquivo .xml do Project</Label>
+                    <Input type="file" accept=".xml" onChange={onFile} />
+                  </div>
+                  <div>
+                    <Label>Data de corte</Label>
+                    <Input type="date" value={dataCorte} onChange={(e) => setDataCorte(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <Label>Observações (opcional)</Label>
+                  <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={atualizarPct} onCheckedChange={setAtualizarPct} id="att-pct" />
+                  <Label htmlFor="att-pct" className="cursor-pointer">Atualizar % realizado pelo PercentComplete do XML (nunca rebaixa lançamento manual maior)</Label>
+                </div>
+
+                {diffs && (
+                  <div className="space-y-3">
+                    {grupos.map((g) => {
+                      const linhas = diffs.map((d, i) => ({ d, i })).filter((x) => x.d.tipo === g.tipo);
+                      if (!linhas.length) return null;
+                      const todosOn = linhas.every((x) => x.d.apply);
+                      return (
+                        <Card key={g.tipo}>
+                          <CardHeader className="py-3 flex flex-row items-center justify-between">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <Badge className={g.cor + " border-none"}>{g.label}</Badge>
+                              <span className="text-muted-foreground">{linhas.length}</span>
+                            </CardTitle>
+                            <Button variant="ghost" size="sm" onClick={() => toggleAll(g.tipo, !todosOn)}>{todosOn ? "Desmarcar todos" : "Marcar todos"}</Button>
+                          </CardHeader>
+                          <CardContent className="pt-0">
+                            <Table>
+                              <TableHeader><TableRow>
+                                <TableHead className="w-8"></TableHead>
+                                <TableHead>Tarefa</TableHead>
+                                <TableHead>Antes</TableHead>
+                                <TableHead>Depois</TableHead>
+                              </TableRow></TableHeader>
+                              <TableBody>
+                                {linhas.map(({ d, i }) => (
+                                  <TableRow key={i}>
+                                    <TableCell><input type="checkbox" checked={d.apply} onChange={(e) => toggleRow(i, e.target.checked)} /></TableCell>
+                                    <TableCell className="max-w-[380px] truncate" title={d.descricao}>{d.descricao}</TableCell>
+                                    <TableCell className="text-xs whitespace-nowrap">{formatBefore(d)}</TableCell>
+                                    <TableCell className="text-xs whitespace-nowrap">{formatAfter(d)}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                    {diffs.length === 0 && <div className="text-sm text-muted-foreground">Nenhuma mudança detectada — o cronograma está idêntico ao banco.</div>}
+                  </div>
+                )}
+              </div>
+              <SheetFooter className="mt-4">
+                <Button disabled={!diffs || diffs.length === 0 || importing} onClick={confirmar}>
+                  {importing ? "Aplicando…" : "Confirmar revisão"}
+                </Button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
+        </CardContent></Card>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-sm flex items-center gap-2"><History className="h-4 w-4" /> Histórico de revisões</CardTitle></CardHeader>
+        <CardContent>
+          {revisoes.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Nenhuma revisão registrada ainda.</div>
+          ) : (
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead className="w-12">#</TableHead>
+                <TableHead>Data de corte</TableHead>
+                <TableHead>Arquivo</TableHead>
+                <TableHead className="text-right">Novos</TableHead>
+                <TableHead className="text-right">Datas</TableHead>
+                <TableHead className="text-right">%</TableHead>
+                <TableHead className="text-right">Removidos</TableHead>
+                <TableHead>Importada em</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {revisoes.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>{r.numero}</TableCell>
+                    <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
+                    <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
+                    <TableCell className="text-right">{r.totais?.novos ?? 0}</TableCell>
+                    <TableCell className="text-right">{r.totais?.alterados_data ?? 0}</TableCell>
+                    <TableCell className="text-right">{r.totais?.alterados_pct ?? 0}</TableCell>
+                    <TableCell className="text-right">{r.totais?.removidos ?? 0}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {atrasos.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Tarefas com mudança de data vs. baseline</CardTitle></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Tarefa</TableHead>
+                <TableHead>Fim baseline</TableHead>
+                <TableHead>Fim atual</TableHead>
+                <TableHead className="text-right">Δ dias</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {atrasos.sort((a, b) => b.delta - a.delta).map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="max-w-[420px] truncate" title={a.descricao}>{a.descricao}</TableCell>
+                    <TableCell>{format(parseISO(a.baseline), "dd/MM/yy")}</TableCell>
+                    <TableCell>{format(parseISO(a.atual), "dd/MM/yy")}</TableCell>
+                    <TableCell className="text-right">
+                      <Badge variant={a.delta > 0 ? "destructive" : "secondary"}>{a.delta > 0 ? `+${a.delta}` : a.delta}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function formatBefore(d: DiffRow): string {
+  if (d.tipo === "novo") return "—";
+  if (d.tipo === "removido") return "(ativo)";
+  if (d.tipo === "restaurado") return "(inativo)";
+  if (d.tipo === "data") return `${d.inicio_antes ?? "—"} → ${d.fim_antes ?? "—"}`;
+  if (d.tipo === "pct") return `${Number(d.pct_antes ?? 0).toFixed(1)}%`;
+  if (d.tipo === "custo") return brl(d.custo_antes ?? 0);
+  return "";
+}
+function formatAfter(d: DiffRow): string {
+  if (d.tipo === "removido") return "(inativo)";
+  if (d.tipo === "restaurado") return "(ativo)";
+  if (d.tipo === "novo" || d.tipo === "data") return `${d.inicio_novo ?? "—"} → ${d.fim_novo ?? "—"}`;
+  if (d.tipo === "pct") return `${Number(d.pct_novo ?? 0).toFixed(1)}%`;
+  if (d.tipo === "custo") return brl(d.custo_novo ?? 0);
+  return "";
+}

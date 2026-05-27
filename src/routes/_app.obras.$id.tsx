@@ -2063,7 +2063,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                                 <span className="truncate max-w-[420px]" title={l.arquivoNome}>{l.arquivoNome}</span>
                               </span>
                               <span className="text-xs font-normal text-muted-foreground">
-                                {aplicar.length} de {l.diffs.length} marcadas · corte {format(parseISO(l.dataCorte), "dd/MM/yyyy")}
+                                {aplicar.length} de {l.diffs.length} marcadas · corte {(() => { try { return l.dataCorte ? format(parseISO(l.dataCorte), "dd/MM/yyyy") : "—"; } catch { return l.dataCorte || "—"; } })()}
                               </span>
                             </CardTitle>
                           </CardHeader>

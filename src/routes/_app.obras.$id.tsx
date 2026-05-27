@@ -1653,6 +1653,102 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
     }
   }
 
+  const maxNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
+
+  async function reverterRevisao(rev: any) {
+    if (Number(rev.numero) !== maxNumero) {
+      toast.error("Reverta primeiro a revisão mais recente.");
+      return;
+    }
+    setRevertendoId(rev.id);
+    try {
+      const { data: snaps, error: snapErr } = await supabase
+        .from("cronograma_item_revisoes")
+        .select("id, cronograma_item_id, tipo_mudanca, data_inicio_anterior, data_fim_anterior, percentual_realizado_anterior, custo_anterior")
+        .eq("revisao_id", rev.id);
+      if (snapErr) throw snapErr;
+
+      const novos = (snaps ?? []).filter((s) => s.tipo_mudanca === "novo");
+      const novosIds = novos.map((s) => s.cronograma_item_id);
+
+      // Bloqueia se algum item "novo" tem medição lançada
+      if (novosIds.length) {
+        const { data: meds, error: medErr } = await supabase
+          .from("itens_medicao")
+          .select("cronograma_item_id")
+          .in("cronograma_item_id", novosIds)
+          .limit(1);
+        if (medErr) throw medErr;
+        if (meds && meds.length > 0) {
+          toast.error("Há itens desta revisão com medição lançada. Cancele/exclua a medição antes de reverter, ou use 'Limpar importados'.", { duration: 8000 });
+          return;
+        }
+      }
+
+      // Aplica reversão item a item (não-novos)
+      for (const s of snaps ?? []) {
+        if (s.tipo_mudanca === "novo") continue;
+        if (!s.cronograma_item_id) continue;
+        const upd: any = {};
+        if (s.tipo_mudanca === "data") {
+          upd.data_inicio = s.data_inicio_anterior;
+          upd.data_fim = s.data_fim_anterior;
+        } else if (s.tipo_mudanca === "pct") {
+          upd.percentual_realizado = s.percentual_realizado_anterior ?? 0;
+        } else if (s.tipo_mudanca === "custo") {
+          upd.custo = s.custo_anterior ?? 0;
+        } else if (s.tipo_mudanca === "removido") {
+          upd.ativo = true;
+        } else if (s.tipo_mudanca === "restaurado") {
+          upd.ativo = false;
+        }
+        if (Object.keys(upd).length) {
+          const { error } = await supabase.from("cronograma_itens").update(upd).eq("id", s.cronograma_item_id);
+          if (error) throw error;
+        }
+      }
+
+      // Apaga dependências e itens criados pela revisão
+      if (novosIds.length) {
+        await supabase.from("cronograma_dependencias").delete().in("item_id", novosIds);
+        const { error: delErr } = await supabase.from("cronograma_itens").delete().in("id", novosIds);
+        if (delErr) throw delErr;
+      }
+
+      // Recalcula percentual_previsto proporcional ao custo_baseline
+      const { data: vivos } = await supabase
+        .from("cronograma_itens")
+        .select("id, custo, custo_baseline")
+        .eq("obra_id", obraId)
+        .eq("ativo", true);
+      const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+      const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
+      if (totalCusto > 0) {
+        await Promise.all(
+          (vivos ?? []).map((i) =>
+            supabase
+              .from("cronograma_itens")
+              .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
+              .eq("id", i.id),
+          ),
+        );
+      }
+
+      // Remove snapshots + cabeçalho da revisão
+      await supabase.from("cronograma_item_revisoes").delete().eq("revisao_id", rev.id);
+      const { error: delRevErr } = await supabase.from("cronograma_revisoes").delete().eq("id", rev.id);
+      if (delRevErr) throw delRevErr;
+
+      toast.success(`Revisão #${rev.numero} revertida`);
+      setConfirmReverter(null);
+      onChange();
+    } catch (e: any) {
+      toast.error("Falha ao reverter: " + (e?.message ?? "erro desconhecido"));
+    } finally {
+      setRevertendoId(null);
+    }
+  }
+
   const grupos: { tipo: DiffRow["tipo"]; label: string; cor: string }[] = [
     { tipo: "novo", label: "Novos", cor: "bg-blue-500/15 text-blue-700" },
     { tipo: "data", label: "Datas alteradas", cor: "bg-amber-500/15 text-amber-700" },

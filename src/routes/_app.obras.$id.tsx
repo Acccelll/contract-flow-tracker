@@ -93,7 +93,7 @@ function ObraDetail() {
             obraId={id}
             temMedicoes={(medicoes ?? []).length > 0}
             temNfs={(nfs ?? []).length > 0}
-            temRecebimentos={(receb ?? []).length > 0}
+            temRecebimentos={(receb ?? []).some((r: any) => r.data_recebimento)}
             onDone={() => {
               qc.invalidateQueries({ queryKey: ["crono", id] });
               qc.invalidateQueries({ queryKey: ["revisoes", id] });

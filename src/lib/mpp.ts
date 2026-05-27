@@ -105,6 +105,18 @@ export function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[
   return { titulo, tasks: raw };
 }
 
+// Detecta arquivo .mpp binário (OLE Compound Document começa com D0 CF 11 E0).
+// Cobre o caso de usuário renomear .mpp para .xml.
+export async function isMppBinary(file: File): Promise<boolean> {
+  if (/\.mpp$/i.test(file.name)) return true;
+  try {
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    return head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0;
+  } catch {
+    return false;
+  }
+}
+
 export function dias(start: string, finish: string): number {
   const a = new Date(start).getTime();
   const b = new Date(finish).getTime();

@@ -1478,210 +1478,242 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
     return wbsPrefix + t.name + (chain ? `  ·  [${chain}]` : "");
   }
 
-  function toggleRow(idx: number, value: boolean) {
-    setDiffs((d) => d?.map((r, i) => (i === idx ? { ...r, apply: value } : r)) ?? null);
+  function toggleRow(loteId: string, idx: number, value: boolean) {
+    setLotes((prev) => prev.map((l) => l.id === loteId
+      ? { ...l, diffs: l.diffs.map((r, i) => (i === idx ? { ...r, apply: value } : r)) }
+      : l));
   }
-  function toggleAll(tipo: DiffRow["tipo"], value: boolean) {
-    setDiffs((d) => d?.map((r) => (r.tipo === tipo ? { ...r, apply: value } : r)) ?? null);
+  function toggleAll(loteId: string, tipo: DiffRow["tipo"], value: boolean) {
+    setLotes((prev) => prev.map((l) => l.id === loteId
+      ? { ...l, diffs: l.diffs.map((r) => (r.tipo === tipo ? { ...r, apply: value } : r)) }
+      : l));
+  }
+
+  // Aplica um lote. cronoAtual reflete o estado do banco antes deste lote
+  // (refetched a cada iteração para encadear corretamente). Retorna o novo número.
+  async function aplicarLote(lote: Lote, ultimoNumero: number, cronoAtual: any[]): Promise<number> {
+    const aplicar = lote.diffs.filter((d) => d.apply);
+    const itensRevisao: any[] = [];
+    const itensAtivos = cronoAtual.filter((i) => i.ativo !== false);
+    const ordemBase = itensAtivos.length;
+    let ordemNext = ordemBase;
+
+    // 1) Novos itens — pula duplicatas por uid_mpp se já existem (cascata entre lotes)
+    const uidsExistentes = new Set(cronoAtual.map((i) => i.uid_mpp).filter(Boolean).map(String));
+    const novos = aplicar.filter((d) => d.tipo === "novo" && !(d.uid && uidsExistentes.has(d.uid)));
+    if (novos.length) {
+      const rows = novos.map((d) => ({
+        obra_id: obraId,
+        descricao: d.descricao,
+        data_inicio: d.inicio_novo!,
+        data_fim: d.fim_novo!,
+        ordem: ordemNext++,
+        custo: Number((d.custo_novo || 0).toFixed(2)),
+        custo_baseline: Number((d.custo_novo || 0).toFixed(2)),
+        percentual_previsto: 0,
+        percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
+        uid_mpp: d.uid || null,
+        data_inicio_baseline: d.inicio_novo!,
+        data_fim_baseline: d.fim_novo!,
+        ativo: true,
+      }));
+      const { data: ins, error } = await supabase
+        .from("cronograma_itens")
+        .insert(rows)
+        .select("id, descricao, data_inicio, data_fim, custo, percentual_realizado");
+      if (error) throw error;
+      ins?.forEach((row: any) => {
+        itensRevisao.push({
+          cronograma_item_id: row.id,
+          descricao_item: row.descricao,
+          tipo_mudanca: "novo",
+          data_inicio_anterior: null, data_inicio_novo: row.data_inicio,
+          data_fim_anterior: null, data_fim_novo: row.data_fim,
+          custo_anterior: null, custo_novo: row.custo,
+          percentual_realizado_anterior: null,
+          percentual_realizado_novo: row.percentual_realizado,
+        });
+      });
+    }
+
+    // G4.1: persistir dependências (predecessors) dos novos itens
+    if (novos.length) {
+      const { data: novosSalvos } = await supabase
+        .from("cronograma_itens")
+        .select("id, uid_mpp")
+        .eq("obra_id", obraId)
+        .in("uid_mpp", novos.map((d) => d.uid).filter(Boolean));
+      const byUid = new Map((novosSalvos ?? []).filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]));
+      const deps: any[] = [];
+      for (const d of novos) {
+        const itemId = byUid.get(String(d.uid));
+        if (!itemId || !d.task) continue;
+        for (const p of d.task.predecessors ?? []) {
+          deps.push({
+            obra_id: obraId,
+            item_id: itemId,
+            predecessor_uid_mpp: p.predecessorUid,
+            tipo: p.tipo,
+            lag_dias: p.lagDias,
+          });
+        }
+      }
+      if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
+    }
+
+    // 2) Updates por item existente
+    for (const d of aplicar) {
+      if (!d.itemId) continue;
+      if (d.tipo === "novo") continue;
+
+      const item = cronoAtual.find((i) => i.id === d.itemId);
+      if (!item) continue;
+      const update: any = {};
+      const log: any = {
+        cronograma_item_id: d.itemId,
+        descricao_item: item?.descricao ?? d.descricao,
+        tipo_mudanca: d.tipo,
+      };
+
+      if (d.tipo === "data") {
+        update.data_inicio = d.inicio_novo;
+        update.data_fim = d.fim_novo;
+        log.data_inicio_anterior = d.inicio_antes;
+        log.data_inicio_novo = d.inicio_novo;
+        log.data_fim_anterior = d.fim_antes;
+        log.data_fim_novo = d.fim_novo;
+        if (item && !item.data_inicio_baseline) update.data_inicio_baseline = d.inicio_antes;
+        if (item && !item.data_fim_baseline) update.data_fim_baseline = d.fim_antes;
+      } else if (d.tipo === "pct") {
+        if (atualizarPct) {
+          const novo = Number(d.pct_novo || 0);
+          const atual = Number(d.pct_antes || 0);
+          if (novo >= atual) update.percentual_realizado = novo;
+        }
+        log.percentual_realizado_anterior = d.pct_antes;
+        log.percentual_realizado_novo = d.pct_novo;
+      } else if (d.tipo === "custo") {
+        // Onda 1.3: XML não altera custo de itens existentes.
+      } else if (d.tipo === "removido") {
+        update.ativo = false;
+      } else if (d.tipo === "restaurado") {
+        update.ativo = true;
+        if (d.task) {
+          update.data_inicio = d.task.start;
+          update.data_fim = d.task.finish;
+        }
+      }
+
+      if (Object.keys(update).length) {
+        const { error } = await supabase.from("cronograma_itens").update(update).eq("id", d.itemId);
+        if (error) throw error;
+      }
+      itensRevisao.push(log);
+    }
+
+    // 3) Recalcular percentual_previsto proporcional ao custo_baseline
+    const { data: vivos } = await supabase
+      .from("cronograma_itens")
+      .select("id, custo, custo_baseline, percentual_previsto")
+      .eq("obra_id", obraId)
+      .eq("ativo", true);
+    const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+    const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
+    if (totalCusto > 0) {
+      await Promise.all(
+        (vivos ?? []).map((i) =>
+          supabase
+            .from("cronograma_itens")
+            .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
+            .eq("id", i.id),
+        ),
+      );
+    }
+
+    // 4) Cabeçalho da revisão
+    const numero = ultimoNumero + 1;
+    const totais = {
+      itens_total: lote.tasksXml.filter((t) => !t.hasChildren).length,
+      novos: novos.length,
+      alterados_data: aplicar.filter((d) => d.tipo === "data").length,
+      alterados_pct: aplicar.filter((d) => d.tipo === "pct").length,
+      alterados_custo: aplicar.filter((d) => d.tipo === "custo").length,
+      removidos: aplicar.filter((d) => d.tipo === "removido").length,
+      restaurados: aplicar.filter((d) => d.tipo === "restaurado").length,
+      custo_total: lote.tasksXml.filter((t) => !t.hasChildren).reduce((a, t) => a + (t.custo || 0), 0),
+    };
+    const { data: rev, error: revErr } = await supabase
+      .from("cronograma_revisoes")
+      .insert({
+        obra_id: obraId,
+        numero,
+        data_corte: lote.dataCorte,
+        arquivo_nome: lote.arquivoNome || null,
+        observacoes: obs || null,
+        totais,
+      })
+      .select("id")
+      .single();
+    if (revErr) throw revErr;
+
+    // 5) Snapshots
+    if (itensRevisao.length) {
+      const rows = itensRevisao.map((r) => ({ ...r, revisao_id: rev!.id }));
+      const { error } = await supabase.from("cronograma_item_revisoes").insert(rows);
+      if (error) throw error;
+    }
+
+    return numero;
   }
 
   async function confirmar() {
-    if (!diffs || diffs.length === 0) {
-      toast.error("Nenhuma mudança para aplicar");
+    if (!lotes.length) {
+      toast.error("Nenhum arquivo carregado");
+      return;
+    }
+    const totalDiffs = lotes.reduce((a, l) => a + l.diffs.filter((d) => d.apply).length, 0);
+    if (totalDiffs === 0) {
+      toast.error("Nenhuma mudança marcada para aplicar");
       return;
     }
     setImporting(true);
+    let totalNovos = 0;
     try {
-      const aplicar = diffs.filter((d) => d.apply);
-      const itensRevisao: any[] = [];
-      const itensAtivos = (crono ?? []).filter((i) => i.ativo !== false);
-      const ordemBase = itensAtivos.length;
-      let ordemNext = ordemBase;
-
-      // 1) Novos itens
-      const novos = aplicar.filter((d) => d.tipo === "novo");
-      if (novos.length) {
-        const rows = novos.map((d) => ({
-          obra_id: obraId,
-          descricao: d.descricao,
-          data_inicio: d.inicio_novo!,
-          data_fim: d.fim_novo!,
-          ordem: ordemNext++,
-          custo: Number((d.custo_novo || 0).toFixed(2)),
-          custo_baseline: Number((d.custo_novo || 0).toFixed(2)),
-          percentual_previsto: 0,
-          percentual_realizado: atualizarPct ? Number((d.pct_novo || 0).toFixed(4)) : 0,
-          uid_mpp: d.uid || null,
-          data_inicio_baseline: d.inicio_novo!,
-          data_fim_baseline: d.fim_novo!,
-          ativo: true,
-        }));
-        const { data: ins, error } = await supabase
-          .from("cronograma_itens")
-          .insert(rows)
-          .select("id, descricao, data_inicio, data_fim, custo, percentual_realizado");
-        if (error) throw error;
-        ins?.forEach((row: any) => {
-          itensRevisao.push({
-            cronograma_item_id: row.id,
-            descricao_item: row.descricao,
-            tipo_mudanca: "novo",
-            data_inicio_anterior: null, data_inicio_novo: row.data_inicio,
-            data_fim_anterior: null, data_fim_novo: row.data_fim,
-            custo_anterior: null, custo_novo: row.custo,
-            percentual_realizado_anterior: null,
-            percentual_realizado_novo: row.percentual_realizado,
-          });
-        });
-      }
-
-      // G4.1: persistir dependências (predecessors) dos novos itens, se vieram no XML
-      if (novos.length) {
-        const { data: novosSalvos } = await supabase
-          .from("cronograma_itens")
-          .select("id, uid_mpp")
-          .eq("obra_id", obraId)
-          .in("uid_mpp", novos.map((d) => d.uid).filter(Boolean));
-        const byUid = new Map((novosSalvos ?? []).filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]));
-        const deps: any[] = [];
-        for (const d of novos) {
-          const itemId = byUid.get(String(d.uid));
-          if (!itemId || !d.task) continue;
-          for (const p of d.task.predecessors ?? []) {
-            deps.push({
-              obra_id: obraId,
-              item_id: itemId,
-              predecessor_uid_mpp: p.predecessorUid,
-              tipo: p.tipo,
-              lag_dias: p.lagDias,
-            });
-          }
+      let ultimoNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
+      let cronoAtual: any[] = crono ?? [];
+      for (let idx = 0; idx < lotes.length; idx++) {
+        const lote = lotes[idx];
+        setImportProgress({ atual: idx + 1, total: lotes.length, nome: lote.arquivoNome });
+        ultimoNumero = await aplicarLote(lote, ultimoNumero, cronoAtual);
+        totalNovos += lote.diffs.filter((d) => d.apply && d.tipo === "novo").length;
+        // refetch crono para o próximo lote
+        if (idx < lotes.length - 1) {
+          const { data: fresh } = await supabase
+            .from("cronograma_itens")
+            .select("*")
+            .eq("obra_id", obraId);
+          cronoAtual = fresh ?? [];
         }
-        if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
       }
 
-      // 2) Updates por item existente
-      for (const d of aplicar) {
-        if (!d.itemId) continue;
-        if (d.tipo === "novo") continue;
-
-        const item = (crono ?? []).find((i) => i.id === d.itemId);
-        const update: any = {};
-        const log: any = {
-          cronograma_item_id: d.itemId,
-          descricao_item: item?.descricao ?? d.descricao,
-          tipo_mudanca: d.tipo,
-        };
-
-        if (d.tipo === "data") {
-          update.data_inicio = d.inicio_novo;
-          update.data_fim = d.fim_novo;
-          log.data_inicio_anterior = d.inicio_antes;
-          log.data_inicio_novo = d.inicio_novo;
-          log.data_fim_anterior = d.fim_antes;
-          log.data_fim_novo = d.fim_novo;
-          // baseline só se ainda não existir
-          if (item && !item.data_inicio_baseline) update.data_inicio_baseline = d.inicio_antes;
-          if (item && !item.data_fim_baseline) update.data_fim_baseline = d.fim_antes;
-        } else if (d.tipo === "pct") {
-          if (atualizarPct) {
-            // só sobrescreve se o XML for >= ao atual (não rebaixar lançamento manual)
-            const novo = Number(d.pct_novo || 0);
-            const atual = Number(d.pct_antes || 0);
-            if (novo >= atual) update.percentual_realizado = novo;
-          }
-          log.percentual_realizado_anterior = d.pct_antes;
-          log.percentual_realizado_novo = d.pct_novo;
-        } else if (d.tipo === "custo") {
-          // Onda 1.3: XML não altera mais custo de itens existentes — branch mantido apenas por compat.
-        } else if (d.tipo === "removido") {
-          update.ativo = false;
-        } else if (d.tipo === "restaurado") {
-          update.ativo = true;
-          if (d.task) {
-            update.data_inicio = d.task.start;
-            update.data_fim = d.task.finish;
-          }
-        }
-
-        if (Object.keys(update).length) {
-          const { error } = await supabase.from("cronograma_itens").update(update).eq("id", d.itemId);
-          if (error) throw error;
-        }
-        itensRevisao.push(log);
-      }
-
-      // 3) Recalcular percentual_previsto proporcional ao custo_baseline entre todos ativos
-      //    (usa baseline para não "dançar" toda semana com os custos remanescentes do XML).
-      const { data: vivos } = await supabase
-        .from("cronograma_itens")
-        .select("id, custo, custo_baseline, percentual_previsto")
-        .eq("obra_id", obraId)
-        .eq("ativo", true);
-      const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
-      const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
-      if (totalCusto > 0) {
-        await Promise.all(
-          (vivos ?? []).map((i) =>
-            supabase
-              .from("cronograma_itens")
-              .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
-              .eq("id", i.id),
-          ),
-        );
-      }
-
-      // 4) Cabeçalho da revisão
-      const ultimoNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
-      const totais = {
-        itens_total: tasksXml.filter((t) => !t.hasChildren).length,
-        novos: aplicar.filter((d) => d.tipo === "novo").length,
-        alterados_data: aplicar.filter((d) => d.tipo === "data").length,
-        alterados_pct: aplicar.filter((d) => d.tipo === "pct").length,
-        alterados_custo: aplicar.filter((d) => d.tipo === "custo").length,
-        removidos: aplicar.filter((d) => d.tipo === "removido").length,
-        restaurados: aplicar.filter((d) => d.tipo === "restaurado").length,
-        custo_total: tasksXml.filter((t) => !t.hasChildren).reduce((a, t) => a + (t.custo || 0), 0),
-      };
-      const { data: rev, error: revErr } = await supabase
-        .from("cronograma_revisoes")
-        .insert({
-          obra_id: obraId,
-          numero: ultimoNumero + 1,
-          data_corte: dataCorte,
-          arquivo_nome: arquivoNome || null,
-          observacoes: obs || null,
-          totais,
-        })
-        .select("id")
-        .single();
-      if (revErr) throw revErr;
-
-      // 5) Snapshots dos itens
-      if (itensRevisao.length) {
-        const rows = itensRevisao.map((r) => ({ ...r, revisao_id: rev!.id }));
-        const { error } = await supabase.from("cronograma_item_revisoes").insert(rows);
-        if (error) throw error;
-      }
-
-      toast.success(`Revisão #${ultimoNumero + 1} registrada`);
-      if (novos.length > 0) {
+      toast.success(`${lotes.length} revisão(ões) registrada(s)`);
+      if (totalNovos > 0) {
         toast.warning(
-          `${novos.length} item(ns) novo(s) adicionado(s) à baseline. Mudanças contratuais devem ser registradas como aditivo (aba Aditivos). Alteração registrada no histórico.`,
+          `${totalNovos} item(ns) novo(s) adicionado(s) à baseline. Mudanças contratuais devem ser registradas como aditivo (aba Aditivos). Alteração registrada no histórico.`,
           { duration: 8000 },
         );
       }
       setOpen(false);
-      setDiffs(null);
-      setArquivoNome("");
-      setObs("");
+      resetSheet();
       onChange();
     } catch (err: any) {
       toast.error(err.message ?? "Erro ao aplicar revisão");
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   }
+
 
   const maxNumero = revisoes.reduce((m, r) => Math.max(m, Number(r.numero || 0)), 0);
 

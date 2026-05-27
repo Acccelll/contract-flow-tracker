@@ -267,6 +267,11 @@ function CronogramaTab({ obra, itens, onChange }: { obra: any; itens: any[]; onC
           </div>
           <p className="text-xs text-muted-foreground mt-1">
             Executado: {brl(somaExec)} de {brl(baseTotal)}
+            {Math.abs(totalDiffReais) > Math.max(1, valorContrato * 0.005) && (
+              <span className="ml-2 text-amber-600">
+                · Cronograma cobre {total.toFixed(1)}% do contrato ({brl(totalDiffReais)} {totalDiffReais > 0 ? "não orçados" : "acima do contrato"})
+              </span>
+            )}
           </p>
         </div>
         <div className="flex gap-2">

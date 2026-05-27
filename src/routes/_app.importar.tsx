@@ -657,6 +657,47 @@ function CronogramaImporter() {
         </CardContent>
       </Card>
 
+      {report && (
+        <Card>
+          <CardContent className="pt-6 space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">Tarefas lidas</div>
+                <div className="font-semibold">{report.stats.tarefasLidas}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">Folhas</div>
+                <div className="font-semibold">{report.stats.folhas}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">Custo total</div>
+                <div className="font-semibold">{brl(report.stats.custoTotal)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase">% médio</div>
+                <div className="font-semibold">{report.stats.percentualMedio.toFixed(1)}%</div>
+              </div>
+            </div>
+            {report.errors.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1">
+                <div className="text-sm font-medium text-destructive">Erros bloqueantes</div>
+                <ul className="text-xs list-disc pl-5 text-destructive">
+                  {report.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+            {report.warnings.length > 0 && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 space-y-1">
+                <div className="text-sm font-medium text-amber-700 dark:text-amber-400">Avisos</div>
+                <ul className="text-xs list-disc pl-5 text-amber-700 dark:text-amber-400">
+                  {report.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {tasks.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">

@@ -150,6 +150,7 @@ function ObraDetail() {
         </TabsContent>
         <TabsContent value="nfs"><NfsTab obra={obra} nfs={nfs ?? []} medicoes={medicoes ?? []} onChange={() => { qc.invalidateQueries({ queryKey: ["nfs", id] }); qc.invalidateQueries({ queryKey: ["receb", id] }); }} /></TabsContent>
         <TabsContent value="recebimentos"><RecebTab receb={receb ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>
+        <TabsContent value="aditivos"><AditivosTab obraId={id} /></TabsContent>
         <TabsContent value="revisoes">
           <RevisoesTab
             obra={obra}
@@ -162,6 +163,7 @@ function ObraDetail() {
             }}
           />
         </TabsContent>
+        <TabsContent value="historico"><HistoricoTab obraId={id} /></TabsContent>
       </Tabs>
 
     </div>

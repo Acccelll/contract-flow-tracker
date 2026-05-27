@@ -1264,6 +1264,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [filtroDiff, setFiltroDiff] = useState("");
   const [tiposVisiveis, setTiposVisiveis] = useState<Set<DiffRow["tipo"]> | null>(null);
   const [verTodasRev, setVerTodasRev] = useState(false);
+  const [revExpandida, setRevExpandida] = useState<string | null>(null);
   const [atrasosAbertos, setAtrasosAbertos] = useState(false);
   const [atrasosLimite, setAtrasosLimite] = useState(50);
   const [atrasosFiltro, setAtrasosFiltro] = useState("");

@@ -2242,6 +2242,49 @@ function RevisaoDetalhes({ revisaoId }: { revisaoId: string }) {
     restaurado: "bg-sky-500/15 text-sky-700",
   };
 
+  // Monta árvore hierárquica (mesma lógica da aba Cronograma) só com nós que contêm mudanças.
+  type DiffNode = {
+    wbs: string;
+    name: string;
+    children: Map<string, DiffNode>;
+    diffs: NonNullable<typeof data>;
+  };
+  const root: DiffNode = { wbs: "", name: "", children: new Map(), diffs: [] };
+  const ensureNode = (parent: DiffNode, wbs: string, name: string): DiffNode => {
+    let n = parent.children.get(wbs);
+    if (!n) {
+      n = { wbs, name, children: new Map(), diffs: [] };
+      parent.children.set(wbs, n);
+    } else if (!n.name && name) {
+      n.name = name;
+    }
+    return n;
+  };
+  for (const d of filtradas) {
+    const { wbs, name, chain } = parseDescricao(String(d.descricao_item ?? ""));
+    let cursor = root;
+    for (const p of chain) cursor = ensureNode(cursor, p.wbs, p.name);
+    const leaf = ensureNode(cursor, wbs || `__${d.id}`, name || "(sem nome)");
+    leaf.diffs.push(d);
+  }
+
+  const flat: { node: DiffNode; depth: number; isLeaf: boolean }[] = [];
+  const walkNode = (n: DiffNode, depth: number) => {
+    const children = Array.from(n.children.values()).sort((a, b) => wbsCompare(a.wbs, b.wbs));
+    for (const c of children) {
+      const isLeaf = c.diffs.length > 0 && c.children.size === 0;
+      flat.push({ node: c, depth, isLeaf });
+      if (!isLeaf) walkNode(c, depth + 1);
+    }
+  };
+  walkNode(root, 0);
+
+  const countDiffs = (n: DiffNode): number => {
+    let s = n.diffs.length;
+    for (const c of n.children.values()) s += countDiffs(c);
+    return s;
+  };
+
   return (
     <div className="p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -2265,36 +2308,66 @@ function RevisaoDetalhes({ revisaoId }: { revisaoId: string }) {
       <div className="rounded-md border bg-background overflow-hidden">
         <Table>
           <TableHeader><TableRow>
-            <TableHead className="w-[110px]">Tipo</TableHead>
+            <TableHead className="w-24">EDT</TableHead>
             <TableHead>Tarefa</TableHead>
+            <TableHead className="w-[90px]">Tipo</TableHead>
             <TableHead>Antes</TableHead>
             <TableHead>Depois</TableHead>
             <TableHead className="text-right w-[80px]">Δ</TableHead>
           </TableRow></TableHeader>
           <TableBody>
-            {filtradas.slice(0, 200).map((d) => {
-              const ad = antesDepois(d);
+            {flat.map(({ node, depth, isLeaf }) => {
+              if (!isLeaf) {
+                const totalDiffs = countDiffs(node);
+                return (
+                  <TableRow key={`g-${node.wbs}`} className="bg-muted/40">
+                    <TableCell className="font-mono text-xs text-muted-foreground">{node.wbs}</TableCell>
+                    <TableCell colSpan={4}>
+                      <div className="flex items-center font-semibold" style={{ paddingLeft: `${depth * 18}px` }}>
+                        <span className="mr-1 inline-block w-4 text-center text-xs text-muted-foreground">▾</span>
+                        {node.name}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">{totalDiffs}</TableCell>
+                  </TableRow>
+                );
+              }
               return (
-                <TableRow key={d.id}>
-                  <TableCell>
-                    <Badge className={(tipoCor[d.tipo_mudanca] ?? "bg-muted text-muted-foreground") + " border-none"}>{d.tipo_mudanca}</Badge>
-                  </TableCell>
-                  <TableCell className="max-w-[420px] truncate" title={d.descricao_item ?? ""}>{d.descricao_item ?? "—"}</TableCell>
-                  <TableCell className="text-xs whitespace-nowrap">{ad.antes}</TableCell>
-                  <TableCell className="text-xs whitespace-nowrap">{ad.depois}</TableCell>
-                  <TableCell className="text-right text-xs">
-                    {"delta" in ad && ad.delta != null && ad.delta !== 0 ? (
-                      <Badge variant={ad.delta > 0 ? "destructive" : "secondary"}>{ad.delta > 0 ? `+${ad.delta}` : ad.delta}d</Badge>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
+                <Fragment key={`leaf-${node.wbs}-${node.diffs[0]?.id}`}>
+                  {node.diffs.map((d, i) => {
+                    const ad = antesDepois(d);
+                    return (
+                      <TableRow key={d.id}>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {i === 0 && !node.wbs.startsWith("__") ? node.wbs : ""}
+                        </TableCell>
+                        <TableCell className="max-w-[420px] truncate" title={node.name}>
+                          <div className="flex items-center" style={{ paddingLeft: `${depth * 18}px` }}>
+                            <span className="mr-1 inline-block w-4 text-center text-xs text-muted-foreground">·</span>
+                            {i === 0 ? node.name : <span className="text-muted-foreground">↳</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={(tipoCor[d.tipo_mudanca] ?? "bg-muted text-muted-foreground") + " border-none"}>{d.tipo_mudanca}</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{ad.antes}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{ad.depois}</TableCell>
+                        <TableCell className="text-right text-xs">
+                          {"delta" in ad && ad.delta != null && ad.delta !== 0 ? (
+                            <Badge variant={ad.delta > 0 ? "destructive" : "secondary"}>{ad.delta > 0 ? `+${ad.delta}` : ad.delta}d</Badge>
+                          ) : null}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </Fragment>
               );
             })}
+            {flat.length === 0 && (
+              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6 text-xs">Nenhuma mudança corresponde aos filtros.</TableCell></TableRow>
+            )}
           </TableBody>
         </Table>
-        {filtradas.length > 200 && (
-          <div className="px-3 py-2 text-xs text-muted-foreground">Mostrando 200 de {filtradas.length}. Use a busca para refinar.</div>
-        )}
       </div>
     </div>
   );

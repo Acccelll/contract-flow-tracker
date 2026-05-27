@@ -19,7 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { brl, calcularVencimento } from "@/lib/billing";
 import { addDays, format, parseISO, differenceInCalendarDays } from "date-fns";
-import { parseMppXml, parentChain as mppParentChain, type MppTask } from "@/lib/mpp";
+import { parseMppXml, parentChain as mppParentChain, isMppBinary, type MppTask } from "@/lib/mpp";
+import { MppNotSupportedDialog } from "@/components/import/MppNotSupportedDialog";
 import { Switch } from "@/components/ui/switch";
 import { AditivosTab } from "@/components/obra/AditivosTab";
 import { HistoricoTab } from "@/components/obra/HistoricoTab";
@@ -1258,6 +1259,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [diffs, setDiffs] = useState<DiffRow[] | null>(null);
   const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
   const [importing, setImporting] = useState(false);
+  const [mppDialogOpen, setMppDialogOpen] = useState(false);
 
   const obraId = obra.id;
   const valorContrato = Number(obra.valor_contrato || 0);
@@ -1279,27 +1281,35 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setArquivoNome(file.name);
-    setDiffs(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const text = String(ev.target?.result ?? "");
-        const { tasks } = parseMppXml(text);
-        const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
-        setTasksXml(tasks);
-        const d = computeDiff(leaves, tasks, crono ?? []);
-        setDiffs(d);
-        const n = d.filter((x) => x.tipo === "novo").length;
-        const dt = d.filter((x) => x.tipo === "data").length;
-        const pc = d.filter((x) => x.tipo === "pct").length;
-        const rm = d.filter((x) => x.tipo === "removido").length;
-        toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
-      } catch (err: any) {
-        toast.error(`Erro ao ler XML: ${err.message}`);
+    isMppBinary(file).then((isBin) => {
+      if (isBin) {
+        console.info("mpp_upload_attempt");
+        setMppDialogOpen(true);
+        e.target.value = "";
+        return;
       }
-    };
-    reader.readAsText(file);
+      setArquivoNome(file.name);
+      setDiffs(null);
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const text = String(ev.target?.result ?? "");
+          const { tasks } = parseMppXml(text);
+          const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
+          setTasksXml(tasks);
+          const d = computeDiff(leaves, tasks, crono ?? []);
+          setDiffs(d);
+          const n = d.filter((x) => x.tipo === "novo").length;
+          const dt = d.filter((x) => x.tipo === "data").length;
+          const pc = d.filter((x) => x.tipo === "pct").length;
+          const rm = d.filter((x) => x.tipo === "removido").length;
+          toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
+        } catch (err: any) {
+          toast.error(`Erro ao ler XML: ${err.message}`);
+        }
+      };
+      reader.readAsText(file);
+    });
   }
 
   // Diff: casa por uid_mpp, com fallback (wbs+nome) — usado para itens importados antes desta feature.
@@ -1648,14 +1658,20 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
             <div className="text-xs text-muted-foreground mt-1">XML do MS Project</div>
           </div>
           <Sheet open={open} onOpenChange={setOpen}>
+            <MppNotSupportedDialog open={mppDialogOpen} onOpenChange={setMppDialogOpen} />
             <SheetTrigger asChild><Button><Upload className="h-4 w-4 mr-2" />Nova revisão</Button></SheetTrigger>
             <SheetContent side="right" className="w-[95vw] sm:max-w-[860px] overflow-y-auto">
               <SheetHeader><SheetTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Importar revisão semanal</SheetTitle></SheetHeader>
               <div className="space-y-4 mt-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <Label>Arquivo .xml do Project</Label>
-                    <Input type="file" accept=".xml" onChange={onFile} />
+                    <div className="flex items-center justify-between">
+                      <Label>Arquivo .xml do Project</Label>
+                      <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground">
+                        Tem .mpp?
+                      </button>
+                    </div>
+                    <Input type="file" accept=".xml,.mpp" onChange={onFile} />
                   </div>
                   <div>
                     <Label>Data de corte</Label>

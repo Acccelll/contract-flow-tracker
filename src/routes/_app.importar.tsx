@@ -15,7 +15,9 @@ import { brl, calcularVencimento } from "@/lib/billing";
 import { Badge } from "@/components/ui/badge";
 import { recalcularPrevisaoNF } from "./_app.obras.$id";
 import { parseISO } from "date-fns";
-import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText, HelpCircle } from "lucide-react";
+import { isMppBinary } from "@/lib/mpp";
+import { MppNotSupportedDialog } from "@/components/import/MppNotSupportedDialog";
 
 export const Route = createFileRoute("/_app/importar")({
   component: Importar,
@@ -415,6 +417,7 @@ function CronogramaImporter() {
   const [ponderacao, setPonderacao] = useState<"custo" | "dias">("custo");
   const [done, setDone] = useState<number | null>(null);
   const [report, setReport] = useState<MppReport | null>(null);
+  const [mppDialogOpen, setMppDialogOpen] = useState(false);
 
 
   const { data: obras } = useQuery({
@@ -450,29 +453,37 @@ function CronogramaImporter() {
     const file = e.target.files?.[0];
     if (!file) return;
     setDone(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const text = String(ev.target?.result ?? "");
-        const { titulo, tasks } = parseMppXml(text);
-        const rep = validateMpp(tasks, valorContrato);
-        setReport(rep);
-        setTitulo(titulo ?? "");
-        setTasks(tasks);
-        // pré-seleciona folhas (incluindo marcos de 0 dias — preserva ART etc.)
-        const initSel: Record<string, boolean> = {};
-        tasks.forEach((t) => { if (!t.hasChildren) initSel[t.uid] = true; });
-        setSelected(initSel);
-        setCollapsed(new Set());
-        if (rep.errors.length) toast.error(`XML com ${rep.errors.length} erro(s) — veja painel`);
-        else if (rep.warnings.length) toast.warning(`${tasks.length} tarefas, ${rep.warnings.length} aviso(s)`);
-        else toast.success(`${tasks.length} tarefas detectadas (${rep.stats.folhas} folhas)`);
-      } catch (err: any) {
-        toast.error(`Erro ao ler XML: ${err.message}`);
-        setReport({ ok: false, errors: [String(err.message)], warnings: [], stats: { tarefasLidas: 0, folhas: 0, custoTotal: 0, percentualMedio: 0 } });
+    isMppBinary(file).then((isBin) => {
+      if (isBin) {
+        console.info("mpp_upload_attempt");
+        setMppDialogOpen(true);
+        e.target.value = "";
+        return;
       }
-    };
-    reader.readAsText(file);
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const text = String(ev.target?.result ?? "");
+          const { titulo, tasks } = parseMppXml(text);
+          const rep = validateMpp(tasks, valorContrato);
+          setReport(rep);
+          setTitulo(titulo ?? "");
+          setTasks(tasks);
+          // pré-seleciona folhas (incluindo marcos de 0 dias — preserva ART etc.)
+          const initSel: Record<string, boolean> = {};
+          tasks.forEach((t) => { if (!t.hasChildren) initSel[t.uid] = true; });
+          setSelected(initSel);
+          setCollapsed(new Set());
+          if (rep.errors.length) toast.error(`XML com ${rep.errors.length} erro(s) — veja painel`);
+          else if (rep.warnings.length) toast.warning(`${tasks.length} tarefas, ${rep.warnings.length} aviso(s)`);
+          else toast.success(`${tasks.length} tarefas detectadas (${rep.stats.folhas} folhas)`);
+        } catch (err: any) {
+          toast.error(`Erro ao ler XML: ${err.message}`);
+          setReport({ ok: false, errors: [String(err.message)], warnings: [], stats: { tarefasLidas: 0, folhas: 0, custoTotal: 0, percentualMedio: 0 } });
+        }
+      };
+      reader.readAsText(file);
+    });
   }
 
   // Somente folhas (tarefas mais profundas de cada ramo) entram nos totais e
@@ -654,6 +665,7 @@ function CronogramaImporter() {
 
   return (
     <div className="space-y-4">
+      <MppNotSupportedDialog open={mppDialogOpen} onOpenChange={setMppDialogOpen} />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /> Cronograma (XML do MS Project)</CardTitle>
@@ -661,8 +673,13 @@ function CronogramaImporter() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Arquivo .xml</Label>
-              <Input type="file" accept=".xml" onChange={onFile} />
+              <div className="flex items-center justify-between">
+                <Label>Arquivo .xml</Label>
+                <button type="button" onClick={() => setMppDialogOpen(true)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <HelpCircle className="h-3 w-3" /> Tem .mpp? Veja como converter
+                </button>
+              </div>
+              <Input type="file" accept=".xml,.mpp" onChange={onFile} />
             </div>
             <div className="space-y-1.5">
               <Label>Obra de destino</Label>

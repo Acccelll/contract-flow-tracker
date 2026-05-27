@@ -88,16 +88,29 @@ function ObraDetail() {
           <h1 className="text-2xl font-semibold">{obra.nome}</h1>
           <p className="text-sm text-muted-foreground">Cód. {obra.codigo} · {obra.clientes?.nome ?? "—"}</p>
         </div>
-        <div className="text-right">
-          <div className="text-2xl font-semibold">{brl(valores?.valor_contrato_atual ?? obra.valor_contrato)}</div>
-          <div className="text-xs text-muted-foreground">
-            Contrato atual
-            {valores && Number(valores.valor_contrato_atual) !== Number(valores.valor_contrato_original) && (
-              <span className="ml-1">
-                (original {brl(valores.valor_contrato_original)} {Number(valores.valor_contrato_atual) > Number(valores.valor_contrato_original) ? "+" : ""}
-                {brl(Number(valores.valor_contrato_atual) - Number(valores.valor_contrato_original))} aditivos)
-              </span>
-            )}
+        <div className="flex items-start gap-4">
+          <LimparImportadosButton
+            obraId={id}
+            temMedicoes={(medicoes ?? []).length > 0}
+            temNfs={(nfs ?? []).length > 0}
+            temRecebimentos={(receb ?? []).length > 0}
+            onDone={() => {
+              qc.invalidateQueries({ queryKey: ["crono", id] });
+              qc.invalidateQueries({ queryKey: ["revisoes", id] });
+              qc.invalidateQueries({ queryKey: ["obra_valores", id] });
+            }}
+          />
+          <div className="text-right">
+            <div className="text-2xl font-semibold">{brl(valores?.valor_contrato_atual ?? obra.valor_contrato)}</div>
+            <div className="text-xs text-muted-foreground">
+              Contrato atual
+              {valores && Number(valores.valor_contrato_atual) !== Number(valores.valor_contrato_original) && (
+                <span className="ml-1">
+                  (original {brl(valores.valor_contrato_original)} {Number(valores.valor_contrato_atual) > Number(valores.valor_contrato_original) ? "+" : ""}
+                  {brl(Number(valores.valor_contrato_atual) - Number(valores.valor_contrato_original))} aditivos)
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </header>

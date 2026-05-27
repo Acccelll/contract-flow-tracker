@@ -98,6 +98,9 @@ function ObraDetail() {
               qc.invalidateQueries({ queryKey: ["crono", id] });
               qc.invalidateQueries({ queryKey: ["revisoes", id] });
               qc.invalidateQueries({ queryKey: ["receb", id] });
+              qc.invalidateQueries({ queryKey: ["nfs", id] });
+              qc.invalidateQueries({ queryKey: ["medicoes", id] });
+              qc.invalidateQueries({ queryKey: ["itens_medicao", id] });
               qc.invalidateQueries({ queryKey: ["obra_valores", id] });
             }}
           />
@@ -1821,20 +1824,38 @@ function LimparImportadosButton({
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [incluirFaturamento, setIncluirFaturamento] = useState(false);
 
-  const bloqueado = temMedicoes || temNfs || temRecebimentos;
+  const temFinanceiro = temMedicoes || temNfs || temRecebimentos;
+  const bloqueado = temFinanceiro && !incluirFaturamento;
   const podeExecutar = confirmText.trim().toUpperCase() === "LIMPAR" && !bloqueado;
 
   async function limpar() {
     if (!podeExecutar) return;
     setLoading(true);
     try {
-      // 1) Previsões de recebimento (não efetivadas) — são derivadas do cronograma
-      await supabase
-        .from("recebimentos")
-        .delete()
-        .eq("obra_id", obraId)
-        .is("data_recebimento", null);
+      if (incluirFaturamento) {
+        // 0a) Itens de medição → medições → NFs → todos recebimentos
+        const { data: meds } = await supabase
+          .from("medicoes").select("id").eq("obra_id", obraId);
+        const medIds = (meds ?? []).map((m) => m.id);
+        if (medIds.length) {
+          await supabase.from("itens_medicao").delete().in("medicao_id", medIds);
+        }
+        // Recebimentos antes das NFs (têm FK lógica nota_fiscal_id)
+        await supabase.from("recebimentos").delete().eq("obra_id", obraId);
+        await supabase.from("notas_fiscais").delete().eq("obra_id", obraId);
+        if (medIds.length) {
+          await supabase.from("medicoes").delete().in("id", medIds);
+        }
+      } else {
+        // 1) Previsões de recebimento (não efetivadas) — derivadas do cronograma
+        await supabase
+          .from("recebimentos")
+          .delete()
+          .eq("obra_id", obraId)
+          .is("data_recebimento", null);
+      }
 
       // 2) Revisões: itens primeiro, depois cabeçalhos
       const { data: revs } = await supabase
@@ -1845,7 +1866,7 @@ function LimparImportadosButton({
         await supabase.from("cronograma_revisoes").delete().in("id", revIds);
       }
 
-      // 3) Baselines de cronograma: itens primeiro, depois cabeçalhos
+      // 3) Baselines de cronograma
       const { data: bls } = await supabase
         .from("cronograma_baselines").select("id").eq("obra_id", obraId);
       const blIds = (bls ?? []).map((b) => b.id);
@@ -1860,9 +1881,14 @@ function LimparImportadosButton({
         .from("cronograma_itens").delete().eq("obra_id", obraId);
       if (errItens) throw errItens;
 
-      toast.success("Dados importados removidos. Você pode reimportar o XML.");
+      toast.success(
+        incluirFaturamento
+          ? "Cronograma e faturamento removidos. Você pode reimportar do zero."
+          : "Dados importados removidos. Você pode reimportar o XML."
+      );
       setOpen(false);
       setConfirmText("");
+      setIncluirFaturamento(false);
       onDone();
     } catch (e: any) {
       toast.error("Falha ao limpar: " + (e?.message ?? "erro desconhecido"));
@@ -1901,24 +1927,38 @@ function LimparImportadosButton({
 
           <div className="rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
             <p className="font-medium text-foreground">Não serão alterados:</p>
-            <p>Contrato, aditivos, medições, notas fiscais, recebimentos já efetivados e logs de auditoria.</p>
+            <p>Contrato, aditivos e logs de auditoria.</p>
           </div>
 
-          {bloqueado && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
-              <p className="font-medium">Limpeza bloqueada</p>
-              <p className="mt-1">
-                Existem registros financeiros desta obra que impedem a limpeza:
-                {temMedicoes && <span className="block">• medições</span>}
-                {temNfs && <span className="block">• notas fiscais</span>}
-                {temRecebimentos && <span className="block">• recebimentos já efetivados</span>}
-              </p>
-              <p className="mt-1">
-                Cancele/remova esses registros antes para evitar referências órfãs.
-              </p>
+          {temFinanceiro && (
+            <div className={`rounded-md border p-3 ${incluirFaturamento ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"}`}>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={incluirFaturamento}
+                  onChange={(e) => setIncluirFaturamento(e.target.checked)}
+                  className="mt-1"
+                  disabled={loading}
+                />
+                <div className="text-sm">
+                  <p className="font-medium">
+                    Também remover medições, notas fiscais e recebimentos
+                  </p>
+                  <p className="mt-1">
+                    Esta obra possui registros financeiros:
+                    {temMedicoes && <span className="block">• medições</span>}
+                    {temNfs && <span className="block">• notas fiscais</span>}
+                    {temRecebimentos && <span className="block">• recebimentos já efetivados</span>}
+                  </p>
+                  <p className="mt-1">
+                    {incluirFaturamento
+                      ? "Tudo será apagado em cascata — inclusive valores já recebidos."
+                      : "Marque para apagar tudo em cascata, ou cancele para preservar o histórico financeiro."}
+                  </p>
+                </div>
+              </label>
             </div>
           )}
-
 
           <div>
             <Label htmlFor="confirm-limpar" className="text-xs">

@@ -1,63 +1,60 @@
-# Importar .mpp (MS Project binário)
+## Objetivo
 
-## Contexto
+A aba **Revisões** mostra hoje, ao mesmo tempo: 3 cards de KPI, histórico completo, tabela longa de tarefas com mudança de data, e — quando o usuário clica "Nova revisão" — um Sheet enorme com arquivo, data, observações, switch de %, e 6 grupos de diffs já expandidos. É muita coisa de uma vez. O plano abaixo organiza isso em etapas claras.
 
-Hoje `/importar` aceita só `.xml` (Save As XML do MS Project). O parser `src/lib/mpp.ts` usa `DOMParser` direto no XML. O formato `.mpp` é binário proprietário — não há parser puro-JS confiável, e o Cloudflare Worker (runtime do TanStack Start neste projeto) **não roda binários nativos, child_process nem MPXJ/LibreOffice**. Isso elimina a opção de converter dentro do próprio backend Lovable.
+## Mudanças na tela principal (`RevisoesTab`)
 
-## Opções avaliadas
+1. **Cabeçalho enxuto em uma linha**
+   - Trocar os 3 cards grandes por uma faixa compacta: `Atraso máx · Revisões · Última importação` + botão **Nova revisão** à direita.
+   - Card "Importar revisão" deixa de existir como cartão separado — vira só o botão.
 
-| Opção | Viável aqui? | Custo | UX |
-|---|---|---|---|
-| A. Parser .mpp puro-JS | ❌ não existe maduro | — | — |
-| B. MPXJ/LibreOffice no Worker | ❌ Worker não suporta nativos | — | — |
-| C. Microservice externo (MPXJ em container) chamado via HTTP | ✅ | Hospedagem extra (Render/Fly/Railway) | Upload transparente |
-| D. Instrução para o usuário converter no MS Project (Save As XML) | ✅ | Zero | Usuário faz 1 passo manual |
-| E. Conversão client-side via [mpxj-wasm](https://github.com/joniles/mpxj) ou similar | ⚠️ existe build WASM do MPXJ, ~10MB, roda no browser | Bundle grande, carregar sob demanda | Funciona offline, sem servidor extra |
+2. **Histórico de revisões em formato resumido**
+   - Mostrar as 3 últimas por padrão, com "Ver todas (N)" para expandir.
+   - Colunas Novos/Datas/%/Removidos viram um único chip resumo (`+12 ✱ 3 datas · 5%`) para reduzir ruído; números detalhados em tooltip.
 
-## Decisão recomendada: **D agora + E como evolução**
+3. **"Tarefas com mudança de data" colapsada por padrão**
+   - Envolver em `<Collapsible>` (já existe em `components/ui/collapsible`), fechada por padrão com badge mostrando a contagem.
+   - Quando aberta, adicionar filtro por texto e um Select de "Δ ≥ X dias" para o usuário não rolar 100+ linhas.
+   - Limitar render inicial a 50 linhas com "Mostrar mais".
 
-Não vale criar/manter microservice (C) só para isso. Opção **D** é entrega imediata sem custo. Opção **E** (MPXJ-WASM lazy-loaded) é o caminho técnico correto e cabe em uma onda futura quando a dor justificar o bundle.
+## Mudanças no sheet "Nova revisão" (wizard de 3 passos)
 
-## Escopo desta onda (Opção D + preparação para E)
+Hoje o Sheet mistura entrada do arquivo, prévia de diffs e ações de confirmação no mesmo scroll. Convertê-lo em wizard com `Tabs` controladas (ou indicador 1·2·3 no topo):
 
-### 1. Aceitar `.mpp` no input, com fluxo guiado
-- `src/routes/_app.importar.tsx`, aba "Cronograma MPP XML":
-  - Trocar `accept=".xml"` por `accept=".xml,.mpp"`.
-  - Ao detectar extensão `.mpp` no `onFile`, **não tentar parsear**. Em vez disso, abrir um Dialog explicando:
-    1. "Arquivos `.mpp` precisam ser exportados como XML antes da importação."
-    2. Passo a passo no MS Project: `Arquivo → Salvar como → Tipo: XML (*.xml)`.
-    3. Botão "Entendi" que limpa o input.
-  - Mesmo tratamento no fluxo de import de revisão semanal (aba Cronograma na obra) — extrair o aviso para um componente compartilhado `MppNotSupportedDialog`.
+**Passo 1 — Arquivo**
+- Dropzone grande (drag-and-drop) com o input `.xml,.mpp`, hint "Tem .mpp?" e o link de conversão existente.
+- Campo Data de corte (pré-preenchido com hoje).
+- Botão **Analisar** habilita ao escolher arquivo. Avança automaticamente ao parse OK.
 
-### 2. Detecção robusta
-- Verificar pela extensão **e** pelo magic number (primeiros bytes `D0 CF 11 E0` = OLE Compound Document, formato do .mpp). Se um `.xml` vier com bytes binários, mostrar o mesmo aviso.
-- Helper `isMppBinary(file: File): Promise<boolean>` em `src/lib/mpp.ts`.
+**Passo 2 — Revisar mudanças**
+- Topo: resumo em chips coloridos clicáveis (Novos 4 · Datas 12 · % 7 · Custo 0 · Removidos 2 · Restaurados 0). Clicar filtra os grupos exibidos.
+- Cada grupo vira um `<Collapsible>` fechado por padrão, com header já mostrando contagem e ações "marcar/desmarcar todos".
+- Estado vazio claro quando `diffs.length === 0` ("Cronograma idêntico ao banco, nada a aplicar").
+- Busca por descrição no topo.
 
-### 3. Texto e affordances
-- Atualizar o label do uploader: "Arquivo XML do MS Project (.xml). Tem `.mpp`? Veja como converter."
-- Link "Veja como converter" abre o mesmo Dialog (sem precisar selecionar arquivo).
-- Adicionar nota curta no Card de import: "Suporte direto a `.mpp` está no roadmap (requer biblioteca WASM de ~10MB, carregada sob demanda)."
+**Passo 3 — Confirmar**
+- Card final com: contagem de mudanças que serão aplicadas (apenas as `apply: true`), switch "Atualizar % realizado", campo Observações.
+- Botões **Voltar** e **Confirmar revisão**.
 
-### 4. Telemetria leve (opcional, sem nova tabela)
-- Quando o usuário seleciona um `.mpp`, registrar `console.info("mpp_upload_attempt")` — serve para futuramente decidir se vale priorizar Opção E.
+Navegação: stepper persistente no `SheetHeader`, com "Voltar" sempre disponível. O fluxo atual de parse/confirmação (`onFile`, `confirmar`, `toggleRow`, `toggleAll`) permanece — apenas reorganizado em passos.
 
-## Fora desta onda
+## Detalhes técnicos
 
-- **Opção C** (microservice MPXJ): só se múltiplos usuários reclamarem do passo manual. Exigiria: container Java + MPXJ, endpoint `/convert`, segredo de auth, hospedagem, monitoramento.
-- **Opção E** (MPXJ-WASM no browser): vale como onda dedicada — precisa avaliar bundle real, suporte a versões de `.mpp` (2003/2007/2010+), e fluxo de progresso na UI.
-- Conversão automática server-side dentro do Worker — bloqueada pelo runtime.
+- Toda mudança fica em `src/routes/_app.obras.$id.tsx` no componente `RevisoesTab` (linhas ~1253-1806). Sem alterações de schema, lógica de parse, RLS ou queries.
+- Componentes novos auxiliares (`StepIndicator`, `DiffSummaryChips`, `DropzoneFile`) podem ficar inline no mesmo arquivo para evitar churn.
+- Reuso de `Collapsible`, `Tabs`, `Badge`, `Sheet` já existentes.
+- Sem mudanças no `CompararRevisoesTab` nem no `MppNotSupportedDialog`.
 
-## Arquivos afetados
+## Critérios de aceite
 
-- `src/lib/mpp.ts`: adicionar `isMppBinary()`.
-- `src/components/import/MppNotSupportedDialog.tsx` (novo): Dialog reutilizável com instruções.
-- `src/routes/_app.importar.tsx`: aceitar `.mpp`, integrar dialog, ajustar textos.
-- `src/routes/_app.obras.$id.tsx`: mesmo tratamento no import de revisão.
-- `.lovable/plan.md`: atualizar seção "Fora desta onda" registrando que D foi entregue e E continua como roadmap.
+- Ao abrir a aba Revisões, o usuário vê no máximo 1 viewport de informação antes de rolar.
+- Lista de "Tarefas com mudança de data" começa fechada com contagem visível.
+- Sheet "Nova revisão" abre no Passo 1 com só dropzone + data. Diffs só aparecem após o parse, no Passo 2.
+- Confirmação acontece num passo dedicado com resumo do que será aplicado.
+- Nenhuma regressão na lógica: parse de XML, toggles individuais/em massa, switch de %, e gravação da revisão funcionam como antes.
 
-## Critério de aceite
+## Fora de escopo
 
-- Selecionar `.mpp` no `/importar` mostra dialog claro, não dispara erro de parser.
-- Selecionar `.xml` continua funcionando exatamente como hoje.
-- Mesmo comportamento na aba de revisão dentro da obra.
-- Renomear `.mpp` para `.xml` ainda é detectado pelo magic number e mostra o dialog.
+- Suporte direto a `.mpp` (continua via instrução de conversão).
+- Refatorar a aba Comparar.
+- Mudanças no modelo de dados.

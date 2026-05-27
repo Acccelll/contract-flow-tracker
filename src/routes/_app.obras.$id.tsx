@@ -1269,7 +1269,9 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [atrasosAbertos, setAtrasosAbertos] = useState(false);
   const [atrasosLimite, setAtrasosLimite] = useState(50);
   const [atrasosFiltro, setAtrasosFiltro] = useState("");
-  const [atrasosMin, setAtrasosMin] = useState<string>("0");
+  const [revertendoId, setRevertendoId] = useState<string | null>(null);
+  const [confirmReverter, setConfirmReverter] = useState<any | null>(null);
+
 
   function resetSheet() {
     setStep(1);

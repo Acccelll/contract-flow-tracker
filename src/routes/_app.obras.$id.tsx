@@ -1452,6 +1452,31 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
         });
       }
 
+      // G4.1: persistir dependências (predecessors) dos novos itens, se vieram no XML
+      if (novos.length) {
+        const { data: novosSalvos } = await supabase
+          .from("cronograma_itens")
+          .select("id, uid_mpp")
+          .eq("obra_id", obraId)
+          .in("uid_mpp", novos.map((d) => d.uid).filter(Boolean));
+        const byUid = new Map((novosSalvos ?? []).filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]));
+        const deps: any[] = [];
+        for (const d of novos) {
+          const itemId = byUid.get(String(d.uid));
+          if (!itemId || !d.task) continue;
+          for (const p of d.task.predecessors ?? []) {
+            deps.push({
+              obra_id: obraId,
+              item_id: itemId,
+              predecessor_uid_mpp: p.predecessorUid,
+              tipo: p.tipo,
+              lag_dias: p.lagDias,
+            });
+          }
+        }
+        if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
+      }
+
       // 2) Updates por item existente
       for (const d of aplicar) {
         if (!d.itemId) continue;

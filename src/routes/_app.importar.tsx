@@ -601,6 +601,28 @@ function CronogramaImporter() {
         if (liErr) throw liErr;
       }
 
+      // G4.1: gravar dependências (caminho crítico) entre itens importados
+      if (itensSalvos && itensSalvos.length) {
+        const byUid = new Map(
+          itensSalvos.filter((i: any) => i.uid_mpp).map((i: any) => [String(i.uid_mpp), i.id]),
+        );
+        const deps: any[] = [];
+        for (const t of escolhidas) {
+          const itemId = byUid.get(String(t.uid));
+          if (!itemId) continue;
+          for (const p of t.predecessors ?? []) {
+            deps.push({
+              obra_id: obraId,
+              item_id: itemId,
+              predecessor_uid_mpp: p.predecessorUid,
+              tipo: p.tipo,
+              lag_dias: p.lagDias,
+            });
+          }
+        }
+        if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
+      }
+
       setDone(rows.length);
       toast.success(`${rows.length} itens importados — baseline v${proximaVersao} criada`);
 

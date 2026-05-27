@@ -1487,19 +1487,21 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
         itensRevisao.push(log);
       }
 
-      // 3) Recalcular percentual_previsto proporcional ao custo entre todos ativos
+      // 3) Recalcular percentual_previsto proporcional ao custo_baseline entre todos ativos
+      //    (usa baseline para não "dançar" toda semana com os custos remanescentes do XML).
       const { data: vivos } = await supabase
         .from("cronograma_itens")
-        .select("id, custo, percentual_previsto")
+        .select("id, custo, custo_baseline, percentual_previsto")
         .eq("obra_id", obraId)
         .eq("ativo", true);
-      const totalCusto = (vivos ?? []).reduce((a, i) => a + Number(i.custo || 0), 0);
+      const baseRef = (i: any) => Number(i.custo_baseline ?? i.custo ?? 0);
+      const totalCusto = (vivos ?? []).reduce((a, i) => a + baseRef(i), 0);
       if (totalCusto > 0) {
         await Promise.all(
           (vivos ?? []).map((i) =>
             supabase
               .from("cronograma_itens")
-              .update({ percentual_previsto: Number(((Number(i.custo || 0) / totalCusto) * 100).toFixed(6)) })
+              .update({ percentual_previsto: Number(((baseRef(i) / totalCusto) * 100).toFixed(6)) })
               .eq("id", i.id),
           ),
         );

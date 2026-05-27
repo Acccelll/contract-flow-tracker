@@ -2063,7 +2063,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                                 <span className="truncate max-w-[420px]" title={l.arquivoNome}>{l.arquivoNome}</span>
                               </span>
                               <span className="text-xs font-normal text-muted-foreground">
-                                {aplicar.length} de {l.diffs.length} marcadas · corte {format(parseISO(l.dataCorte), "dd/MM/yyyy")}
+                                {aplicar.length} de {l.diffs.length} marcadas · corte {(() => { try { return l.dataCorte ? format(parseISO(l.dataCorte), "dd/MM/yyyy") : "—"; } catch { return l.dataCorte || "—"; } })()}
                               </span>
                             </CardTitle>
                           </CardHeader>
@@ -2119,14 +2119,14 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                 </Button>
                 {step < 3 ? (
                   <Button
-                    disabled={lotes.length === 0 || (step === 2 && lotes.every((l) => l.diffs.length === 0))}
+                    disabled={lotes.length === 0 || (step === 2 && lotes.every((l) => l.diffs.length === 0)) || (step === 2 && lotes.some((l) => !l.dataCorte))}
                     onClick={() => setStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}
                   >
                     Avançar
                   </Button>
                 ) : (
                   <Button
-                    disabled={lotes.length === 0 || lotes.reduce((a, l) => a + l.diffs.filter((d) => d.apply).length, 0) === 0 || importing}
+                    disabled={lotes.length === 0 || lotes.some((l) => !l.dataCorte) || lotes.reduce((a, l) => a + l.diffs.filter((d) => d.apply).length, 0) === 0 || importing}
                     onClick={confirmar}
                   >
                     {importing

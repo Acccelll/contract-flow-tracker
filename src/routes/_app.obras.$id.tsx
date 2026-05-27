@@ -594,6 +594,15 @@ function MedicoesTab({
 
     const valorTotal = totalPeriodo;
 
+    // Onda 1.2: amarrar a medição à baseline vigente (maior versão da obra)
+    const { data: blVigente } = await supabase
+      .from("cronograma_baselines")
+      .select("id, versao")
+      .eq("obra_id", obra.id)
+      .order("versao", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     const { data: med, error: medErr } = await supabase
       .from("medicoes")
       .insert({
@@ -604,6 +613,7 @@ function MedicoesTab({
         valor: valorTotal,
         status: "rascunho",
         observacoes: form.observacoes || null,
+        baseline_id: blVigente?.id ?? null,
       })
       .select()
       .single();

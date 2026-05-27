@@ -269,6 +269,7 @@ function Importar() {
 
 // ============== Cronograma (MS Project XML) ==============
 
+type MppDependency = { predecessorUid: string; tipo: "FS" | "SS" | "FF" | "SF"; lagDias: number };
 type MppTask = {
   uid: string;
   name: string;
@@ -282,6 +283,14 @@ type MppTask = {
   hasChildren: boolean;
   custo: number;
   percentComplete?: number;
+  predecessors: MppDependency[];
+};
+
+const TIPO_MAP: Record<string, MppDependency["tipo"]> = { "0": "FF", "1": "FS", "2": "SF", "3": "SS" };
+const lagToDays = (raw?: string) => {
+  if (!raw) return 0;
+  const n = Number(raw);
+  return isFinite(n) && n !== 0 ? Math.round(n / 14400) : 0;
 };
 
 function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
@@ -301,6 +310,15 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
     const rawCost = Number(get("Cost") ?? "0");
     const fixedCost = Number(get("FixedCost") ?? "0");
     const custo = (rawCost || fixedCost) / 100;
+    const predecessors: MppDependency[] = Array.from(t.querySelectorAll(":scope > PredecessorLink"))
+      .map((pl) => {
+        const puid = pl.querySelector(":scope > PredecessorUID")?.textContent?.trim();
+        const tipoCode = pl.querySelector(":scope > Type")?.textContent?.trim() ?? "1";
+        const lag = pl.querySelector(":scope > LinkLag")?.textContent?.trim();
+        if (!puid) return null;
+        return { predecessorUid: puid, tipo: TIPO_MAP[tipoCode] ?? "FS", lagDias: lagToDays(lag) };
+      })
+      .filter((d): d is MppDependency => d !== null);
     return {
       uid: get("UID") ?? "",
       name: get("Name") ?? "(sem nome)",
@@ -313,6 +331,7 @@ function parseMppXml(xmlText: string): { titulo?: string; tasks: MppTask[] } {
       hasChildren: false,
       custo: isFinite(custo) ? custo : 0,
       percentComplete: Number(get("PercentComplete") ?? "0") || 0,
+      predecessors,
     };
   }).filter((t) => t.outlineLevel > 0 && t.name);
 

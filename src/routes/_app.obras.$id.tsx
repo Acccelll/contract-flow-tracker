@@ -1340,18 +1340,8 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           apply: true,
         });
       }
-      if (custoMudou) {
-        result.push({
-          tipo: "custo",
-          itemId: item.id,
-          uid: t.uid,
-          descricao: item.descricao,
-          custo_antes: Number(item.custo || 0),
-          custo_novo: t.custo,
-          task: t,
-          apply: true,
-        });
-      }
+      // Bloco de detecção de mudança de custo removido (Onda 1.3).
+
     }
 
     // Removidos: itens ativos que não bateram com nenhuma tarefa

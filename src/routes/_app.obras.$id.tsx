@@ -113,6 +113,7 @@ function ObraDetail() {
           <TabsTrigger value="medicoes">Medições</TabsTrigger>
           <TabsTrigger value="nfs">Faturamento</TabsTrigger>
           <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
+          <TabsTrigger value="revisoes">Revisões</TabsTrigger>
         </TabsList>
 
         <TabsContent value="previsao"><PrevisaoTab obra={obra} crono={crono ?? []} receb={receb ?? []} nfs={nfs ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["receb", id] })} /></TabsContent>

@@ -1309,40 +1309,61 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const atrasados = atrasos.filter((a) => a.delta > 0);
   const atrasoMax = atrasos.reduce((m, a) => Math.max(m, a.delta), 0);
 
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    isMppBinary(file).then((isBin) => {
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    e.target.value = "";
+
+    const novosLotes: Lote[] = [];
+    let primeiroBinario = false;
+    for (const file of files) {
+      const isBin = await isMppBinary(file);
       if (isBin) {
         console.info("mpp_upload_attempt");
-        setMppDialogOpen(true);
-        e.target.value = "";
-        return;
+        primeiroBinario = true;
+        continue;
       }
-      setArquivoNome(file.name);
-      setDiffs(null);
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const text = String(ev.target?.result ?? "");
-          const { tasks } = parseMppXml(text);
-          const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
-          setTasksXml(tasks);
-          const d = computeDiff(leaves, tasks, crono ?? []);
-          setDiffs(d);
-          setStep(2);
-          const n = d.filter((x) => x.tipo === "novo").length;
-          const dt = d.filter((x) => x.tipo === "data").length;
-          const pc = d.filter((x) => x.tipo === "pct").length;
-          const rm = d.filter((x) => x.tipo === "removido").length;
-          toast.success(`${d.length} mudanças detectadas (${n} novas, ${dt} datas, ${pc} %, ${rm} removidas)`);
-        } catch (err: any) {
-          toast.error(`Erro ao ler XML: ${err.message}`);
-        }
-      };
-      reader.readAsText(file);
+      try {
+        const text = await file.text();
+        const { tasks } = parseMppXml(text);
+        const leaves = tasks.filter((t) => !t.hasChildren && t.start && t.finish);
+        const d = computeDiff(leaves, tasks, crono ?? []);
+        novosLotes.push({
+          id: (typeof crypto !== "undefined" && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : Math.random().toString(36).slice(2),
+          arquivoNome: file.name,
+          tasksXml: tasks,
+          diffs: d,
+          dataCorte: format(new Date(), "yyyy-MM-dd"),
+        });
+      } catch (err: any) {
+        toast.error(`Erro ao ler ${file.name}: ${err.message}`);
+      }
+    }
+    if (primeiroBinario) setMppDialogOpen(true);
+    if (novosLotes.length) {
+      setLotes((prev) => {
+        const combined = [...prev, ...novosLotes];
+        if (!loteAtivoId) setLoteAtivoId(combined[0].id);
+        return combined;
+      });
+      const totalMud = novosLotes.reduce((a, l) => a + l.diffs.length, 0);
+      toast.success(`${novosLotes.length} arquivo(s) preparado(s) · ${totalMud} mudanças detectadas`);
+      setStep(2);
+    }
+  }
+
+  function removerLote(id: string) {
+    setLotes((prev) => {
+      const novo = prev.filter((l) => l.id !== id);
+      if (loteAtivoId === id) setLoteAtivoId(novo[0]?.id ?? null);
+      return novo;
     });
   }
+
+  function atualizarDataLote(id: string, dataCorte: string) {
+    setLotes((prev) => prev.map((l) => (l.id === id ? { ...l, dataCorte } : l)));
+  }
+
 
   // Diff: casa por uid_mpp, com fallback (wbs+nome) — usado para itens importados antes desta feature.
   function computeDiff(leaves: MppTask[], allTasks: MppTask[], itens: any[]): DiffRow[] {

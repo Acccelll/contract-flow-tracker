@@ -1251,6 +1251,16 @@ type DiffRow = {
   apply: boolean;
 };
 
+type Lote = {
+  id: string;
+  arquivoNome: string;
+  tasksXml: MppTask[];
+  diffs: DiffRow[];
+  dataCorte: string;
+};
+
+
+
 function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: any[]; revisoes: any[]; onChange: () => void }) {
   const [open, setOpen] = useState(false);
   const [lotes, setLotes] = useState<Lote[]>([]);

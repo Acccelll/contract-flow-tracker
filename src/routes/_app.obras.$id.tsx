@@ -1253,13 +1253,12 @@ type DiffRow = {
 
 function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: any[]; revisoes: any[]; onChange: () => void }) {
   const [open, setOpen] = useState(false);
-  const [arquivoNome, setArquivoNome] = useState<string>("");
-  const [dataCorte, setDataCorte] = useState<string>(format(new Date(), "yyyy-MM-dd"));
+  const [lotes, setLotes] = useState<Lote[]>([]);
+  const [loteAtivoId, setLoteAtivoId] = useState<string | null>(null);
   const [obs, setObs] = useState<string>("");
   const [atualizarPct, setAtualizarPct] = useState<boolean>(true);
-  const [diffs, setDiffs] = useState<DiffRow[] | null>(null);
-  const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ atual: number; total: number; nome: string } | null>(null);
   const [mppDialogOpen, setMppDialogOpen] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [filtroDiff, setFiltroDiff] = useState("");
@@ -1275,12 +1274,12 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
 
   function resetSheet() {
     setStep(1);
-    setDiffs(null);
-    setTasksXml([]);
-    setArquivoNome("");
+    setLotes([]);
+    setLoteAtivoId(null);
     setObs("");
     setFiltroDiff("");
     setTiposVisiveis(null);
+    setImportProgress(null);
   }
 
   const obraId = obra.id;

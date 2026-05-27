@@ -61,6 +61,10 @@ function ObraDetail() {
     queryKey: ["receb", id],
     queryFn: async () => (await supabase.from("recebimentos").select("*").eq("obra_id", id).order("data_prevista")).data ?? [],
   });
+  const { data: revisoes } = useQuery({
+    queryKey: ["revisoes", id],
+    queryFn: async () => (await supabase.from("cronograma_revisoes").select("*").eq("obra_id", id).order("numero", { ascending: false })).data ?? [],
+  });
 
   if (!obra) return <div className="p-8 text-muted-foreground">Carregando…</div>;
 

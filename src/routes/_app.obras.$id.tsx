@@ -383,7 +383,7 @@ function buildTree(itens: any[]): CronoNode[] {
 
 function aggregate(n: CronoNode, valorContrato: number): { custo: number; pct: number; executado: number; base: number; inicio?: string; fim?: string } {
   const leafCompute = (item: any) => {
-    const custo = Number(item.custo || 0);
+    const custo = Number(item.custo_baseline ?? item.custo ?? 0);
     const pct = Number(item.percentual_previsto || 0);
     const base = custo > 0 ? custo : (pct / 100) * valorContrato;
     const pctReal = Number(item.percentual_realizado || 0);

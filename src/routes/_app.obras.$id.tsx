@@ -2018,6 +2018,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                 <TableHead>Arquivo</TableHead>
                 <TableHead>Mudanças</TableHead>
                 <TableHead>Importada em</TableHead>
+                <TableHead className="w-24 text-right">Ações</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {(verTodasRev ? revisoes : revisoes.slice(0, 3)).map((r) => {
@@ -2029,6 +2030,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                     t.removidos ? `${t.removidos} removidas` : null,
                   ].filter(Boolean);
                   const aberta = revExpandida === r.id;
+                  const podeReverter = Number(r.numero) === maxNumero;
                   return (
                     <Fragment key={r.id}>
                       <TableRow
@@ -2045,10 +2047,22 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                           {chips.length ? chips.join(" · ") : "sem mudanças"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!podeReverter || revertendoId === r.id}
+                            title={podeReverter ? "Reverter esta revisão" : `Reverta primeiro a revisão #${maxNumero}`}
+                            onClick={() => setConfirmReverter(r)}
+                          >
+                            <Undo2 className="h-4 w-4 mr-1" />
+                            Reverter
+                          </Button>
+                        </TableCell>
                       </TableRow>
                       {aberta && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
-                          <TableCell colSpan={6} className="p-0">
+                          <TableCell colSpan={7} className="p-0">
                             <RevisaoDetalhes revisaoId={r.id} />
                           </TableCell>
                         </TableRow>

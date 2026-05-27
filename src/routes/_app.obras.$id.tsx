@@ -1312,7 +1312,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
       const inicioMudou = String(item.data_inicio) !== String(t.start);
       const fimMudou = String(item.data_fim) !== String(t.finish);
       const pctMudou = Math.abs(Number(item.percentual_realizado || 0) - t.percentComplete) > 0.01;
-      const custoMudou = Math.abs(Number(item.custo || 0) - t.custo) > 0.005;
+      // Onda 1.3: XML nunca altera custo de itens existentes (custo é congelado pela baseline).
 
       if (inicioMudou || fimMudou) {
         result.push({

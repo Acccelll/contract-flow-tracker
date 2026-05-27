@@ -450,6 +450,7 @@ export type Database = {
           observacoes: string | null
           outras_retencoes: number
           pdf_url: string | null
+          status: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj: string | null
           tomador_nome: string | null
           updated_at: string
@@ -473,6 +474,7 @@ export type Database = {
           observacoes?: string | null
           outras_retencoes?: number
           pdf_url?: string | null
+          status?: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj?: string | null
           tomador_nome?: string | null
           updated_at?: string
@@ -496,6 +498,7 @@ export type Database = {
           observacoes?: string | null
           outras_retencoes?: number
           pdf_url?: string | null
+          status?: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj?: string | null
           tomador_nome?: string | null
           updated_at?: string
@@ -672,13 +675,31 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      medicao_status: "rascunho" | "enviada" | "aprovada" | "rejeitada"
+      medicao_status:
+        | "rascunho"
+        | "enviada"
+        | "aprovada"
+        | "rejeitada"
+        | "em_revisao"
+        | "faturada"
+        | "cancelada"
+      nf_status:
+        | "rascunho"
+        | "emitida"
+        | "enviada"
+        | "aprovada_cliente"
+        | "recebida"
+        | "cancelada"
       recebimento_status:
         | "previsto"
         | "a_receber"
         | "pago"
         | "atrasado"
         | "antecipado"
+        | "parcial"
+        | "recebido"
+        | "inadimplente"
+        | "cancelado"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -806,13 +827,33 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      medicao_status: ["rascunho", "enviada", "aprovada", "rejeitada"],
+      medicao_status: [
+        "rascunho",
+        "enviada",
+        "aprovada",
+        "rejeitada",
+        "em_revisao",
+        "faturada",
+        "cancelada",
+      ],
+      nf_status: [
+        "rascunho",
+        "emitida",
+        "enviada",
+        "aprovada_cliente",
+        "recebida",
+        "cancelada",
+      ],
       recebimento_status: [
         "previsto",
         "a_receber",
         "pago",
         "atrasado",
         "antecipado",
+        "parcial",
+        "recebido",
+        "inadimplente",
+        "cancelado",
       ],
     },
   },

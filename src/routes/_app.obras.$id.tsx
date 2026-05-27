@@ -1829,7 +1829,14 @@ function LimparImportadosButton({
     if (!podeExecutar) return;
     setLoading(true);
     try {
-      // 1) Revisões: itens primeiro, depois cabeçalhos
+      // 1) Previsões de recebimento (não efetivadas) — são derivadas do cronograma
+      await supabase
+        .from("recebimentos")
+        .delete()
+        .eq("obra_id", obraId)
+        .is("data_recebimento", null);
+
+      // 2) Revisões: itens primeiro, depois cabeçalhos
       const { data: revs } = await supabase
         .from("cronograma_revisoes").select("id").eq("obra_id", obraId);
       const revIds = (revs ?? []).map((r) => r.id);
@@ -1838,7 +1845,7 @@ function LimparImportadosButton({
         await supabase.from("cronograma_revisoes").delete().in("id", revIds);
       }
 
-      // 2) Baselines de cronograma: itens primeiro, depois cabeçalhos
+      // 3) Baselines de cronograma: itens primeiro, depois cabeçalhos
       const { data: bls } = await supabase
         .from("cronograma_baselines").select("id").eq("obra_id", obraId);
       const blIds = (bls ?? []).map((b) => b.id);
@@ -1847,7 +1854,7 @@ function LimparImportadosButton({
         await supabase.from("cronograma_baselines").delete().in("id", blIds);
       }
 
-      // 3) Dependências e itens do cronograma
+      // 4) Dependências e itens do cronograma
       await supabase.from("cronograma_dependencias").delete().eq("obra_id", obraId);
       const { error: errItens } = await supabase
         .from("cronograma_itens").delete().eq("obra_id", obraId);

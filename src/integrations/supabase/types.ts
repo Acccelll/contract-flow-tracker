@@ -86,6 +86,83 @@ export type Database = {
         }
         Relationships: []
       }
+      cronograma_baselines: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          motivo: string
+          obra_id: string
+          observacoes: string | null
+          versao: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          motivo: string
+          obra_id: string
+          observacoes?: string | null
+          versao: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          motivo?: string
+          obra_id?: string
+          observacoes?: string | null
+          versao?: number
+        }
+        Relationships: []
+      }
+      cronograma_item_baseline: {
+        Row: {
+          baseline_id: string
+          created_at: string
+          cronograma_item_id: string
+          custo: number
+          data_fim: string | null
+          data_inicio: string | null
+          descricao: string | null
+          id: string
+          percentual_previsto: number
+          uid_mpp: string | null
+        }
+        Insert: {
+          baseline_id: string
+          created_at?: string
+          cronograma_item_id: string
+          custo?: number
+          data_fim?: string | null
+          data_inicio?: string | null
+          descricao?: string | null
+          id?: string
+          percentual_previsto?: number
+          uid_mpp?: string | null
+        }
+        Update: {
+          baseline_id?: string
+          created_at?: string
+          cronograma_item_id?: string
+          custo?: number
+          data_fim?: string | null
+          data_inicio?: string | null
+          descricao?: string | null
+          id?: string
+          percentual_previsto?: number
+          uid_mpp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cronograma_item_baseline_baseline_id_fkey"
+            columns: ["baseline_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_baselines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cronograma_item_revisoes: {
         Row: {
           created_at: string
@@ -293,6 +370,7 @@ export type Database = {
       }
       medicoes: {
         Row: {
+          baseline_id: string | null
           created_at: string
           data_aprovacao: string | null
           data_corte: string
@@ -308,6 +386,7 @@ export type Database = {
           versao_otimista: number
         }
         Insert: {
+          baseline_id?: string | null
           created_at?: string
           data_aprovacao?: string | null
           data_corte: string
@@ -323,6 +402,7 @@ export type Database = {
           versao_otimista?: number
         }
         Update: {
+          baseline_id?: string | null
           created_at?: string
           data_aprovacao?: string | null
           data_corte?: string
@@ -338,6 +418,13 @@ export type Database = {
           versao_otimista?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "medicoes_baseline_id_fkey"
+            columns: ["baseline_id"]
+            isOneToOne: false
+            referencedRelation: "cronograma_baselines"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "medicoes_obra_id_fkey"
             columns: ["obra_id"]

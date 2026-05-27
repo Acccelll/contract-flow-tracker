@@ -499,8 +499,48 @@ function CronogramaImporter() {
       });
       const { error } = await supabase.from("cronograma_itens").insert(rows);
       if (error) throw error;
+
+      // Onda 1.2: criar baseline v1 (ou próxima versão) congelada com os itens recém-importados
+      const { data: itensSalvos, error: selErr } = await supabase
+        .from("cronograma_itens")
+        .select("id, uid_mpp, descricao, custo_baseline, custo, data_inicio_baseline, data_inicio, data_fim_baseline, data_fim, percentual_previsto")
+        .eq("obra_id", obraId)
+        .eq("ativo", true);
+      if (selErr) throw selErr;
+
+      const { data: ultimaBl } = await supabase
+        .from("cronograma_baselines")
+        .select("versao")
+        .eq("obra_id", obraId)
+        .order("versao", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const proximaVersao = (ultimaBl?.versao ?? 0) + 1;
+
+      const { data: novaBl, error: blErr } = await supabase
+        .from("cronograma_baselines")
+        .insert({ obra_id: obraId, versao: proximaVersao, motivo: "import_inicial" })
+        .select("id")
+        .single();
+      if (blErr) throw blErr;
+
+      if (itensSalvos && itensSalvos.length) {
+        const linhas = itensSalvos.map((ci: any) => ({
+          baseline_id: novaBl.id,
+          cronograma_item_id: ci.id,
+          uid_mpp: ci.uid_mpp,
+          descricao: ci.descricao,
+          custo: Number(ci.custo_baseline ?? ci.custo ?? 0),
+          data_inicio: ci.data_inicio_baseline ?? ci.data_inicio,
+          data_fim: ci.data_fim_baseline ?? ci.data_fim,
+          percentual_previsto: Number(ci.percentual_previsto ?? 0),
+        }));
+        const { error: liErr } = await supabase.from("cronograma_item_baseline").insert(linhas);
+        if (liErr) throw liErr;
+      }
+
       setDone(rows.length);
-      toast.success(`${rows.length} itens de cronograma importados`);
+      toast.success(`${rows.length} itens importados — baseline v${proximaVersao} criada`);
 
     } catch (err: any) {
       toast.error(err.message);

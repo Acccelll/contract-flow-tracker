@@ -1908,10 +1908,11 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
         </CardHeader>
         <CardContent>
           {revisoes.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Nenhuma revisão registrada ainda.</div>
+            <div className="text-sm text-muted-foreground">Nenhuma revisão registrada ainda. Clique em "Nova revisão" para importar a primeira.</div>
           ) : (
             <Table>
               <TableHeader><TableRow>
+                <TableHead className="w-8"></TableHead>
                 <TableHead className="w-12">#</TableHead>
                 <TableHead>Data de corte</TableHead>
                 <TableHead>Arquivo</TableHead>
@@ -1927,16 +1928,32 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
                     t.alterados_pct ? `${t.alterados_pct} %` : null,
                     t.removidos ? `${t.removidos} removidas` : null,
                   ].filter(Boolean);
+                  const aberta = revExpandida === r.id;
                   return (
-                    <TableRow key={r.id}>
-                      <TableCell>{r.numero}</TableCell>
-                      <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
-                      <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground" title={`Novos ${t.novos ?? 0} · Datas ${t.alterados_data ?? 0} · % ${t.alterados_pct ?? 0} · Removidos ${t.removidos ?? 0}`}>
-                        {chips.length ? chips.join(" · ") : "sem mudanças"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
-                    </TableRow>
+                    <React.Fragment key={r.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-accent/40"
+                        onClick={() => setRevExpandida((cur) => (cur === r.id ? null : r.id))}
+                      >
+                        <TableCell>
+                          {aberta ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                        </TableCell>
+                        <TableCell>{r.numero}</TableCell>
+                        <TableCell>{format(parseISO(r.data_corte), "dd/MM/yyyy")}</TableCell>
+                        <TableCell className="max-w-[260px] truncate" title={r.arquivo_nome ?? ""}>{r.arquivo_nome ?? "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground" title={`Novos ${t.novos ?? 0} · Datas ${t.alterados_data ?? 0} · % ${t.alterados_pct ?? 0} · Removidos ${t.removidos ?? 0}`}>
+                          {chips.length ? chips.join(" · ") : "sem mudanças"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{format(parseISO(r.created_at), "dd/MM/yy HH:mm")}</TableCell>
+                      </TableRow>
+                      {aberta && (
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableCell colSpan={6} className="p-0">
+                            <RevisaoDetalhes revisaoId={r.id} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </TableBody>
@@ -1944,90 +1961,10 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
           )}
         </CardContent>
       </Card>
-
-      {/* Tarefas com mudança de data — colapsável */}
-      {atrasos.length > 0 && (
-        <Collapsible open={atrasosAbertos} onOpenChange={setAtrasosAbertos}>
-          <Card>
-            <CollapsibleTrigger asChild>
-              <CardHeader className="cursor-pointer hover:bg-accent/40 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  {atrasosAbertos ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  <AlertCircle className="h-4 w-4 text-amber-500" />
-                  Tarefas com mudança de data vs. baseline
-                  <Badge variant="secondary" className="ml-1">{atrasos.length}</Badge>
-                </CardTitle>
-                <span className="text-xs text-muted-foreground">
-                  {atrasados.length} atrasada(s) · maior Δ {atrasoMax}d
-                </span>
-              </CardHeader>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap gap-2 items-center">
-                  <Input
-                    placeholder="Buscar tarefa…"
-                    value={atrasosFiltro}
-                    onChange={(e) => setAtrasosFiltro(e.target.value)}
-                    className="h-9 max-w-xs"
-                  />
-                  <Select value={atrasosMin} onValueChange={setAtrasosMin}>
-                    <SelectTrigger className="h-9 w-[180px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">Todas as mudanças</SelectItem>
-                      <SelectItem value="1">Δ ≥ 1 dia</SelectItem>
-                      <SelectItem value="3">Δ ≥ 3 dias</SelectItem>
-                      <SelectItem value="7">Δ ≥ 7 dias</SelectItem>
-                      <SelectItem value="15">Δ ≥ 15 dias</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {(() => {
-                  const minN = Number(atrasosMin) || 0;
-                  const filtradas = atrasos
-                    .filter((a) => Math.abs(a.delta) >= minN)
-                    .filter((a) => !atrasosFiltro || a.descricao.toLowerCase().includes(atrasosFiltro.toLowerCase()))
-                    .sort((a, b) => b.delta - a.delta);
-                  const visiveis = filtradas.slice(0, atrasosLimite);
-                  return (
-                    <>
-                      <Table>
-                        <TableHeader><TableRow>
-                          <TableHead>Tarefa</TableHead>
-                          <TableHead>Fim baseline</TableHead>
-                          <TableHead>Fim atual</TableHead>
-                          <TableHead className="text-right">Δ dias</TableHead>
-                        </TableRow></TableHeader>
-                        <TableBody>
-                          {visiveis.map((a) => (
-                            <TableRow key={a.id}>
-                              <TableCell className="max-w-[420px] truncate" title={a.descricao}>{a.descricao}</TableCell>
-                              <TableCell>{format(parseISO(a.baseline), "dd/MM/yy")}</TableCell>
-                              <TableCell>{format(parseISO(a.atual), "dd/MM/yy")}</TableCell>
-                              <TableCell className="text-right">
-                                <Badge variant={a.delta > 0 ? "destructive" : "secondary"}>{a.delta > 0 ? `+${a.delta}` : a.delta}</Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>Mostrando {visiveis.length} de {filtradas.length}</span>
-                        {filtradas.length > atrasosLimite && (
-                          <Button variant="ghost" size="sm" onClick={() => setAtrasosLimite((n) => n + 50)}>Mostrar mais</Button>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
-              </CardContent>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
-      )}
     </div>
   );
 }
+
 
 
 function formatBefore(d: DiffRow): string {

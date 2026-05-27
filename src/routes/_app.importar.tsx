@@ -15,7 +15,9 @@ import { brl, calcularVencimento } from "@/lib/billing";
 import { Badge } from "@/components/ui/badge";
 import { recalcularPrevisaoNF } from "./_app.obras.$id";
 import { parseISO } from "date-fns";
-import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText, HelpCircle } from "lucide-react";
+import { isMppBinary } from "@/lib/mpp";
+import { MppNotSupportedDialog } from "@/components/import/MppNotSupportedDialog";
 
 export const Route = createFileRoute("/_app/importar")({
   component: Importar,

@@ -2206,7 +2206,7 @@ function RevisaoDetalhes({ revisaoId }: { revisaoId: string }) {
     if (!antes || !depois) return null;
     try { return differenceInCalendarDays(parseISO(depois), parseISO(antes)); } catch { return null; }
   }
-  function antesDepois(d: typeof data[number]) {
+  function antesDepois(d: NonNullable<typeof data>[number]) {
     switch (d.tipo_mudanca) {
       case "novo":
         return { antes: "—", depois: `${fmtDate(d.data_inicio_novo)} → ${fmtDate(d.data_fim_novo)}` };

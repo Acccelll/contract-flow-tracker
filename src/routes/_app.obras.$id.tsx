@@ -1259,6 +1259,7 @@ function RevisoesTab({ obra, crono, revisoes, onChange }: { obra: any; crono: an
   const [diffs, setDiffs] = useState<DiffRow[] | null>(null);
   const [tasksXml, setTasksXml] = useState<MppTask[]>([]);
   const [importing, setImporting] = useState(false);
+  const [mppDialogOpen, setMppDialogOpen] = useState(false);
 
   const obraId = obra.id;
   const valorContrato = Number(obra.valor_contrato || 0);

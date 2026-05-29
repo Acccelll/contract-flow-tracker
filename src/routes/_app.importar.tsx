@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -1346,7 +1346,7 @@ function BmsImporter() {
                   {unmatched.length} descrição(ões) sem item correspondente no cronograma — serão ignoradas:
                 </div>
                 <div className="text-xs text-amber-800 dark:text-amber-200 max-h-24 overflow-auto">
-                  {unmatched.map((d) => <div key={d}>• {d}</div>)}
+                  {unmatched.map((d: string) => <div key={d}>• {d}</div>)}
                 </div>
               </div>
             )}

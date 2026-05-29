@@ -15,9 +15,11 @@ import { brl, calcularVencimento } from "@/lib/billing";
 import { Badge } from "@/components/ui/badge";
 import { recalcularPrevisaoNF } from "./_app.obras.$id";
 import { parseISO } from "date-fns";
-import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText, HelpCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, CalendarClock, FileText, HelpCircle, Layers } from "lucide-react";
 import { isMppBinary } from "@/lib/mpp";
 import { MppNotSupportedDialog } from "@/components/import/MppNotSupportedDialog";
+import { parseBmsWorkbook, type BmsWorkbook, type BmsSheet } from "@/lib/bms-excel";
+import { format } from "date-fns";
 
 export const Route = createFileRoute("/_app/importar")({
   component: Importar,
@@ -188,11 +190,13 @@ function Importar() {
       </header>
 
       <Tabs defaultValue="planilha">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="planilha"><FileSpreadsheet className="h-4 w-4 mr-2" />Planilha de contratos</TabsTrigger>
           <TabsTrigger value="cronograma"><CalendarClock className="h-4 w-4 mr-2" />Cronograma (MS Project XML)</TabsTrigger>
+          <TabsTrigger value="bms"><Layers className="h-4 w-4 mr-2" />BMS (Excel)</TabsTrigger>
           <TabsTrigger value="nfse"><FileText className="h-4 w-4 mr-2" />NFS-e (Excel)</TabsTrigger>
         </TabsList>
+
 
         <TabsContent value="planilha" className="space-y-6 mt-4">
           <Card>
@@ -261,9 +265,14 @@ function Importar() {
           <CronogramaImporter />
         </TabsContent>
 
+        <TabsContent value="bms" className="mt-4">
+          <BmsImporter />
+        </TabsContent>
+
         <TabsContent value="nfse" className="mt-4">
           <NfseImporter />
         </TabsContent>
+
       </Tabs>
     </div>
   );

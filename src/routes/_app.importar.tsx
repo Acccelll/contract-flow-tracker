@@ -1148,5 +1148,266 @@ function NfseImporter() {
 // Suprime warning de import não usado em builds onde calcularVencimento ainda não é usado neste arquivo
 void calcularVencimento;
 
+// ============== BMS (Excel) ==============
+
+function normalizar(s: string) {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function BmsImporter() {
+  const [obraId, setObraId] = useState<string>("");
+  const [wb, setWb] = useState<BmsWorkbook | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState<{ medicoes: number; itens: number; ignorados: number } | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const { data: obras } = useQuery({
+    queryKey: ["obras-lista-bms"],
+    queryFn: async () => (await supabase.from("obras").select("id, codigo, nome, valor_contrato").order("codigo")).data ?? [],
+  });
+
+  const { data: crono } = useQuery({
+    queryKey: ["crono-bms", obraId],
+    queryFn: async () =>
+      obraId
+        ? ((await supabase.from("cronograma_itens").select("id, descricao, custo, custo_baseline").eq("obra_id", obraId).eq("ativo", true)).data ?? [])
+        : [],
+    enabled: !!obraId,
+  });
+
+  // Mapa de cronograma normalizado → id
+  const mapCron = useMemo(() => {
+    const m = new Map<string, { id: string; baseline: number }>();
+    (crono ?? []).forEach((c: any) => {
+      if (c.descricao) m.set(normalizar(c.descricao), { id: c.id, baseline: Number(c.custo_baseline ?? c.custo ?? 0) });
+    });
+    return m;
+  }, [crono]);
+
+  // Itens "sem cronograma" a partir do workbook
+  const unmatched = useMemo(() => {
+    if (!wb) return [] as string[];
+    const set = new Set<string>();
+    for (const s of wb.sheets) {
+      for (const it of s.itens) {
+        if (!mapCron.has(normalizar(it.descricao))) set.add(it.descricao);
+      }
+    }
+    return Array.from(set);
+  }, [wb, mapCron]);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDone(null);
+    setWb(null);
+    try {
+      const parsed = await parseBmsWorkbook(file);
+      if (parsed.sheets.length === 0) {
+        toast.error("Nenhuma sheet BMS reconhecida no arquivo.");
+        return;
+      }
+      setWb(parsed);
+      toast.success(`${parsed.sheets.length} medições detectadas em ${parsed.arquivoNome}`);
+    } catch (err: any) {
+      toast.error(`Erro ao ler planilha: ${err.message}`);
+    }
+  }
+
+  async function importar() {
+    if (!wb || !obraId) return;
+    setImporting(true);
+    setProgress({ done: 0, total: wb.sheets.length });
+    try {
+      let totalMed = 0;
+      let totalItens = 0;
+      let totalIgnorados = 0;
+
+      for (let i = 0; i < wb.sheets.length; i++) {
+        const sh = wb.sheets[i];
+        // upsert da medicao por (obra_id, numero)
+        const payload: any = {
+          obra_id: obraId,
+          numero: sh.numero,
+          data_corte: sh.data_fim ?? sh.data ?? new Date().toISOString().slice(0, 10),
+          data_inicio: sh.data_inicio ?? null,
+          valor: sh.total_medicao,
+          status: "rascunho" as const,
+          arquivo_origem: wb.arquivoNome,
+          sheet_origem: sh.sheetName,
+        };
+        const { data: med, error: medErr } = await supabase
+          .from("medicoes")
+          .upsert(payload, { onConflict: "obra_id,numero" })
+          .select("id")
+          .single();
+        if (medErr || !med) {
+          toast.error(`Medição ${sh.numero}: ${medErr?.message}`);
+          continue;
+        }
+        // limpa itens antigos para reimportação determinística
+        await supabase.from("itens_medicao").delete().eq("medicao_id", med.id);
+
+        const linhas: any[] = [];
+        for (const it of sh.itens) {
+          const match = mapCron.get(normalizar(it.descricao));
+          if (!match) {
+            totalIgnorados++;
+            continue;
+          }
+          linhas.push({
+            medicao_id: med.id,
+            cronograma_item_id: match.id,
+            percentual_atual: it.percentual_atual,
+            percentual_anterior: it.percentual_anterior,
+            valor_atual: it.valor_mes,
+            valor_anterior: it.valor_anterior,
+            bms_item_codigo: it.codigo,
+            bms_descricao: it.descricao,
+          });
+        }
+        if (linhas.length > 0) {
+          const { error: itErr } = await supabase.from("itens_medicao").insert(linhas);
+          if (itErr) {
+            toast.error(`Itens ${sh.numero}: ${itErr.message}`);
+            continue;
+          }
+          totalItens += linhas.length;
+        }
+        totalMed++;
+        setProgress({ done: i + 1, total: wb.sheets.length });
+      }
+
+      setDone({ medicoes: totalMed, itens: totalItens, ignorados: totalIgnorados });
+      toast.success(`${totalMed} medições importadas · ${totalItens} itens · ${totalIgnorados} ignorados`);
+      setWb(null);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setImporting(false);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Layers className="h-4 w-4" /> Importar BMS (Excel)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Obra de destino *</Label>
+              <Select value={obraId} onValueChange={setObraId}>
+                <SelectTrigger><SelectValue placeholder="Selecione a obra" /></SelectTrigger>
+                <SelectContent>
+                  {(obras ?? []).map((o: any) => (
+                    <SelectItem key={o.id} value={o.id}>{o.codigo} · {o.nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Arquivo BMS (.xlsx)</Label>
+              <Input type="file" accept=".xlsx,.xls" onChange={onFile} disabled={!obraId} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Cada aba do workbook (BMS 01, BMS 02, …) vira uma medição. Itens são vinculados ao cronograma pela descrição.
+            Reimportar o mesmo número de BMS substitui os itens anteriores.
+          </p>
+        </CardContent>
+      </Card>
+
+      {wb && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Pré-visualização — {wb.arquivoNome}</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {wb.sheets.length} medições · total {brl(wb.sheets.reduce((a, s) => a + s.total_medicao, 0))}
+              </p>
+            </div>
+            <Button onClick={importar} disabled={importing || !obraId}>
+              <Upload className="h-4 w-4 mr-2" />
+              {importing ? `Importando… (${progress?.done}/${progress?.total})` : "Importar agora"}
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {unmatched.length > 0 && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3">
+                <div className="text-xs font-medium text-amber-900 dark:text-amber-100 mb-1">
+                  {unmatched.length} descrição(ões) sem item correspondente no cronograma — serão ignoradas:
+                </div>
+                <div className="text-xs text-amber-800 dark:text-amber-200 max-h-24 overflow-auto">
+                  {unmatched.map((d) => <div key={d}>• {d}</div>)}
+                </div>
+              </div>
+            )}
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Sheet</TableHead>
+                  <TableHead>Nº</TableHead>
+                  <TableHead>Período</TableHead>
+                  <TableHead className="text-right">Total da medição</TableHead>
+                  <TableHead className="text-right">Itens</TableHead>
+                  <TableHead className="text-right">Vinculados</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {wb.sheets.map((s) => {
+                  const vinc = s.itens.filter((i) => mapCron.has(normalizar(i.descricao))).length;
+                  return (
+                    <TableRow key={s.sheetName}>
+                      <TableCell className="font-mono text-xs">{s.sheetName}</TableCell>
+                      <TableCell>{s.numero}</TableCell>
+                      <TableCell className="text-xs">
+                        {s.data_inicio ? format(parseISO(s.data_inicio), "dd/MM/yy") : "—"}
+                        {" → "}
+                        {s.data_fim ? format(parseISO(s.data_fim), "dd/MM/yy") : "—"}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">{brl(s.total_medicao)}</TableCell>
+                      <TableCell className="text-right">{s.itens.length}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={vinc === s.itens.length ? "secondary" : "outline"} className={vinc === s.itens.length ? "bg-green-100 text-green-900 dark:bg-green-900/30 dark:text-green-200" : ""}>
+                          {vinc}/{s.itens.length}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            {(crono ?? []).length === 0 && (
+              <div className="text-xs text-amber-700 dark:text-amber-300">
+                Esta obra ainda não tem cronograma. Importe o XML do MS Project antes para vincular os itens do BMS.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {done && (
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-2 text-green-700 dark:text-green-300">
+            <CheckCircle2 className="h-4 w-4" />
+            {done.medicoes} medições · {done.itens} itens importados · {done.ignorados} itens sem cronograma ignorados.
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+
 
 

@@ -432,6 +432,8 @@ export type Database = {
       }
       itens_medicao: {
         Row: {
+          bms_descricao: string | null
+          bms_item_codigo: string | null
           created_at: string
           cronograma_item_id: string
           id: string
@@ -442,6 +444,8 @@ export type Database = {
           valor_atual: number
         }
         Insert: {
+          bms_descricao?: string | null
+          bms_item_codigo?: string | null
           created_at?: string
           cronograma_item_id: string
           id?: string
@@ -452,6 +456,8 @@ export type Database = {
           valor_atual?: number
         }
         Update: {
+          bms_descricao?: string | null
+          bms_item_codigo?: string | null
           created_at?: string
           cronograma_item_id?: string
           id?: string
@@ -480,6 +486,7 @@ export type Database = {
       }
       medicoes: {
         Row: {
+          arquivo_origem: string | null
           baseline_id: string | null
           created_at: string
           data_aprovacao: string | null
@@ -490,12 +497,14 @@ export type Database = {
           obra_id: string
           observacoes: string | null
           percentual: number | null
+          sheet_origem: string | null
           status: Database["public"]["Enums"]["medicao_status"]
           updated_at: string
           valor: number
           versao_otimista: number
         }
         Insert: {
+          arquivo_origem?: string | null
           baseline_id?: string | null
           created_at?: string
           data_aprovacao?: string | null
@@ -506,12 +515,14 @@ export type Database = {
           obra_id: string
           observacoes?: string | null
           percentual?: number | null
+          sheet_origem?: string | null
           status?: Database["public"]["Enums"]["medicao_status"]
           updated_at?: string
           valor?: number
           versao_otimista?: number
         }
         Update: {
+          arquivo_origem?: string | null
           baseline_id?: string | null
           created_at?: string
           data_aprovacao?: string | null
@@ -522,6 +533,7 @@ export type Database = {
           obra_id?: string
           observacoes?: string | null
           percentual?: number | null
+          sheet_origem?: string | null
           status?: Database["public"]["Enums"]["medicao_status"]
           updated_at?: string
           valor?: number
@@ -553,6 +565,8 @@ export type Database = {
       }
       notas_fiscais: {
         Row: {
+          codigo_art: string | null
+          codigo_cno: string | null
           codigo_verificacao: string | null
           competencia: string | null
           created_at: string
@@ -567,16 +581,22 @@ export type Database = {
           observacoes: string | null
           outras_retencoes: number
           pdf_url: string | null
+          percentual_material: number | null
+          retencao_cbs: number
+          retencao_ibs: number
           status: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj: string | null
           tomador_nome: string | null
           updated_at: string
           valor: number
           valor_liquido: number | null
+          valor_material: number | null
           valor_servicos: number | null
           versao_otimista: number
         }
         Insert: {
+          codigo_art?: string | null
+          codigo_cno?: string | null
           codigo_verificacao?: string | null
           competencia?: string | null
           created_at?: string
@@ -591,16 +611,22 @@ export type Database = {
           observacoes?: string | null
           outras_retencoes?: number
           pdf_url?: string | null
+          percentual_material?: number | null
+          retencao_cbs?: number
+          retencao_ibs?: number
           status?: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj?: string | null
           tomador_nome?: string | null
           updated_at?: string
           valor?: number
           valor_liquido?: number | null
+          valor_material?: number | null
           valor_servicos?: number | null
           versao_otimista?: number
         }
         Update: {
+          codigo_art?: string | null
+          codigo_cno?: string | null
           codigo_verificacao?: string | null
           competencia?: string | null
           created_at?: string
@@ -615,12 +641,16 @@ export type Database = {
           observacoes?: string | null
           outras_retencoes?: number
           pdf_url?: string | null
+          percentual_material?: number | null
+          retencao_cbs?: number
+          retencao_ibs?: number
           status?: Database["public"]["Enums"]["nf_status"]
           tomador_cnpj?: string | null
           tomador_nome?: string | null
           updated_at?: string
           valor?: number
           valor_liquido?: number | null
+          valor_material?: number | null
           valor_servicos?: number | null
           versao_otimista?: number
         }
@@ -650,11 +680,16 @@ export type Database = {
       }
       obras: {
         Row: {
+          aliquota_cbs: number
+          aliquota_ibs: number
+          aliquota_inss: number
+          aliquota_iss: number
           cliente_id: string | null
           codigo: string
           created_at: string
           data_fim: string | null
           data_inicio: string | null
+          data_previsao_termino: string | null
           dia_fixo_pagamento: number | null
           id: string
           local: string | null
@@ -663,18 +698,25 @@ export type Database = {
           owner_id: string
           pedido_contrato: string | null
           percentual_antecipacao: number | null
+          percentual_material: number
           prazo_emitir_nf_dias: number | null
           prazo_pagamento_dias: number | null
           regra_medicao: string | null
+          status: Database["public"]["Enums"]["obra_status"]
           updated_at: string
           valor_contrato: number
         }
         Insert: {
+          aliquota_cbs?: number
+          aliquota_ibs?: number
+          aliquota_inss?: number
+          aliquota_iss?: number
           cliente_id?: string | null
           codigo: string
           created_at?: string
           data_fim?: string | null
           data_inicio?: string | null
+          data_previsao_termino?: string | null
           dia_fixo_pagamento?: number | null
           id?: string
           local?: string | null
@@ -683,18 +725,25 @@ export type Database = {
           owner_id: string
           pedido_contrato?: string | null
           percentual_antecipacao?: number | null
+          percentual_material?: number
           prazo_emitir_nf_dias?: number | null
           prazo_pagamento_dias?: number | null
           regra_medicao?: string | null
+          status?: Database["public"]["Enums"]["obra_status"]
           updated_at?: string
           valor_contrato?: number
         }
         Update: {
+          aliquota_cbs?: number
+          aliquota_ibs?: number
+          aliquota_inss?: number
+          aliquota_iss?: number
           cliente_id?: string | null
           codigo?: string
           created_at?: string
           data_fim?: string | null
           data_inicio?: string | null
+          data_previsao_termino?: string | null
           dia_fixo_pagamento?: number | null
           id?: string
           local?: string | null
@@ -703,9 +752,11 @@ export type Database = {
           owner_id?: string
           pedido_contrato?: string | null
           percentual_antecipacao?: number | null
+          percentual_material?: number
           prazo_emitir_nf_dias?: number | null
           prazo_pagamento_dias?: number | null
           regra_medicao?: string | null
+          status?: Database["public"]["Enums"]["obra_status"]
           updated_at?: string
           valor_contrato?: number
         }
@@ -882,6 +933,12 @@ export type Database = {
         | "aprovada_cliente"
         | "recebida"
         | "cancelada"
+      obra_status:
+        | "planejada"
+        | "em_andamento"
+        | "paralisada"
+        | "concluida"
+        | "cancelada"
       recebimento_status:
         | "previsto"
         | "a_receber"
@@ -1036,6 +1093,13 @@ export const Constants = {
         "enviada",
         "aprovada_cliente",
         "recebida",
+        "cancelada",
+      ],
+      obra_status: [
+        "planejada",
+        "em_andamento",
+        "paralisada",
+        "concluida",
         "cancelada",
       ],
       recebimento_status: [
